@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "snare"
+version = "0.1.0"
+description = "A one-voice snare and clap synthesizer rendered offline to WAV"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.24", "scipy>=1.14"]
+
+[project.optional-dependencies]
+audition = ["sounddevice>=0.4"]
+test = ["pytest>=7", "soundfile>=0.12"]
+
+[project.scripts]
+snare = "snare.cli:main"
+
+[tool.setuptools]
+packages = ["snare"]
+
+[tool.setuptools.package-data]
+snare = ["data/*.json", "data/*.f64", "data/presets/*.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: long-running checks (reference renders of long patches)",
+]
+
+[tool.ruff]
+line-length = 120

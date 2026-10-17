@@ -1,0 +1,58 @@
+instrument = "snare"
+schema = 1
+seed = 1
+
+[body]
+tune_hz  = 233.0
+level_db = -4.0
+damping  = 1.2
+modes = [
+  { ratio = 1.0,   level_db = 0.0 },
+  { ratio = 1.593, level_db = -5.0 },
+  { ratio = 2.136, level_db = -10.0 },
+]
+pitch = [
+  { ms = 0.0, ratio = 1.15 },
+  { ms = 6.0, ratio = 1.0 },
+]
+amp = [
+  { ms = 0.0,   gain = 0.0 },
+  { ms = 0.25,  gain = 1.0 },
+  { ms = 12.0,  gain = 0.45 },
+  { ms = 45.0,  gain = 0.12 },
+  { ms = 110.0, gain = 0.0 },
+]
+
+[[noise]]
+level_db = -8.0
+band_hz  = [1500.0, 18000.0]
+rattle   = 0.0
+amp = [
+  { ms = 0.0,  gain = 0.0 },
+  { ms = 0.03, gain = 1.0 },
+  { ms = 0.1,  gain = 0.6 },
+  { ms = 1.5,  gain = 0.12 },
+  { ms = 5.0,  gain = 0.0 },
+]
+
+[[noise]]
+level_db = -7.0
+band_hz  = [3000.0, 12000.0]
+rattle   = 0.35
+amp = [
+  { ms = 0.0,   gain = 0.0 },
+  { ms = 0.8,   gain = 1.0 },
+  { ms = 18.0,  gain = 0.45 },
+  { ms = 70.0,  gain = 0.1 },
+  { ms = 140.0, gain = 0.0 },
+]
+
+[drive]
+db = 4.0
+
+[output]
+sample_rate = 48000
+format      = "float32"
+mode        = "gain"
+db          = -9.6
+polarity    = 1
