@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from contextlib import AbstractContextManager
 
-    from numpy.typing import NDArray
+    from numpy.typing import ArrayLike, NDArray
 
     type Floats = NDArray[np.float64]
     type Audio = NDArray[np.float32]
@@ -58,8 +58,14 @@ if TYPE_CHECKING:
     class Done(Protocol):
         """What reports a finished render: its generation, its result or failure, its time, and if it is newest."""
 
-        def __call__(self, generation: int, result: object, elapsed: float, *, newest: bool) -> None:
+        def __call__(self, generation: int, result: object, elapsed: float, /, *, newest: bool) -> None:
             """Report the render."""
+
+    class Chance(Protocol):
+        """What draws a blind pair's order: random.SystemRandom, or a seeded generator in a test."""
+
+        def random(self) -> float:
+            """Draw a number in [0, 1)."""
 
 
 GAP_S = 0.5
@@ -71,6 +77,14 @@ POLL_S = 0.1  # how often the session looks at its files and its pairs
 # What a render can fail with: its own errors, and the lookup and type errors a bug would raise, so that a failed
 # render is reported and the watcher keeps watching.
 FAILURES = (ValueError, RuntimeError, OSError, ArithmeticError, MemoryError, LookupError, TypeError)
+
+
+class Offer(NamedTuple):
+    """A slot's newest render: its generation, its take buffers, and the sample matched to them."""
+
+    generation: int
+    buffers: list[Audio]
+    sample: Audio | None
 
 
 class AuditionError(Exception):
@@ -135,7 +149,7 @@ class Bed:
     before the next start.
     """
 
-    def __init__(self, frames: Floats, rate: int, bpm: float, bars: int) -> None:
+    def __init__(self, frames: ArrayLike, rate: int, bpm: float, bars: int) -> None:
         """Keep the bed's frames as float32, and its tempo grid."""
         self.frames = np.ascontiguousarray(frames, dtype=np.float32)
         self.channels = self.frames.shape[1]
@@ -175,14 +189,14 @@ class Hits:
         tempo: Tempo | None = None,
         *,
         bed: Bed | None = None,
-        rng: random.Random | None = None,
+        rng: Chance | None = None,
     ) -> None:
         """Start with no buffers: nothing plays until a slot is offered one."""
         self.rate, self.bed, self.rng = rate, bed, rng
         self.bpm: float | None = None if tempo is None else tempo.bpm
         self.beats: tuple[int, ...] = (2, 4) if tempo is None else tuple(tempo.beats)
         self.channels = bed.channels if bed is not None else 1
-        self._offers: list[tuple[int, list[Audio], Audio | None] | None] = [None] * slots
+        self._offers: list[Offer | None] = [None] * slots
         self._lock = threading.Lock()
         self.generations = [-1] * slots
         self.buffers: list[list[Audio] | None] = [None] * slots
@@ -210,8 +224,13 @@ class Hits:
         """
         with self._lock:
             current = self._offers[slot]
-            if current is None or generation > current[0]:
-                self._offers[slot] = (generation, list(buffers), sample)
+            if current is None or generation > current.generation:
+                self._offers[slot] = Offer(generation, list(buffers), sample)
+
+    def offered(self, slot: int) -> Offer | None:
+        """Return the newest render offered to a slot, whether or not a hit has taken it yet."""
+        with self._lock:
+            return self._offers[slot]
 
     def wait(self) -> float:
         """Seconds until the next hit."""
@@ -221,10 +240,10 @@ class Hits:
         """Take every offer newer than its slot's buffers."""
         with self._lock:
             for i, offered in enumerate(self._offers):
-                if offered is not None and offered[0] > self.generations[i]:
-                    self.generations[i], self.buffers[i] = offered[0], offered[1]
+                if offered is not None and offered.generation > self.generations[i]:
+                    self.generations[i], self.buffers[i] = offered.generation, offered.buffers
                     if i == 0:
-                        self.sample = offered[2]
+                        self.sample = offered.sample
 
     def _hit_time(self, n: int, bpm: float) -> int:
         """Return where hit n starts: on the beat grid, counted from the first bar."""
@@ -361,7 +380,7 @@ class Session:
         paths: Path_ | Sequence[Path_],
         settings: Settings = DEFAULTS,
         *,
-        rng: random.Random | None = None,
+        rng: Chance | None = None,
         out: TextIO | None = None,
     ) -> None:
         """Render every patch, load the bed and the sample, and start a watcher per patch."""
@@ -565,7 +584,7 @@ def audition(
     *,
     out: TextIO | None = None,
     stream_factory: Callable[[int, int, Fill], AbstractContextManager[object]] | None = None,
-    rng: random.Random | None = None,
+    rng: Chance | None = None,
 ) -> int:
     """Play the patches until interrupted; with `settings.watch`, re-render on every edit."""
     report = out or sys.stdout
