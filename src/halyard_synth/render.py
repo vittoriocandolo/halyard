@@ -418,7 +418,7 @@ class Headroom:
     edge_db: float = math.nan  # nan where the status never changes
 
 
-def _alphas(drives: ArrayLike) -> Floats:
+def alphas_of(drives: ArrayLike) -> Floats:
     """Return α with α / tanh α = 10^(drive/20), for many drives at once: bisection on [G − 1, G]."""
     g = 10.0 ** (np.asarray(drives, dtype=float) / 20.0)
     lo, hi = np.maximum(g - 1.0, 0.0), g.copy()
@@ -430,7 +430,7 @@ def _alphas(drives: ArrayLike) -> Floats:
     return out
 
 
-def _drives(alphas: ArrayLike) -> Floats:
+def drives_of(alphas: ArrayLike) -> Floats:
     """Return the drive in dB of each α: 20·log₁₀(α / tanh α), and 0 for α = 0."""
     a = np.asarray(alphas, dtype=float)
     out: Floats = np.where(a > 0, 20.0 * np.log10(a / np.tanh(np.where(a > 0, a, 1.0))), 0.0)
@@ -484,7 +484,7 @@ def drive_headroom(s: Synthesis, drive_db: float, d: Domain) -> Headroom | None:
     if d.inside:
         grid = np.append(np.arange(drive_db + HEADROOM_STEP_DB, DRIVE_MAX, HEADROOM_STEP_DB), DRIVE_MAX)
         below = drops * (1.0 - 1e-12)  # just before each drop, where the step still counts
-        cand = np.concatenate((_alphas(grid), below[(below > s.alpha) & (below <= a_max)]))
+        cand = np.concatenate((alphas_of(grid), below[(below > s.alpha) & (below <= a_max)]))
         cand = np.sort(cand[cand > s.alpha])
         out = np.flatnonzero(ratios(s, cand) > 1.0)
         if not out.size:
@@ -494,14 +494,14 @@ def drive_headroom(s: Synthesis, drive_db: float, d: Domain) -> Headroom | None:
     else:
         grid = np.append(np.arange(drive_db - HEADROOM_STEP_DB, 0.0, -HEADROOM_STEP_DB), 0.0)
         above = drops * (1.0 + 1e-12)  # just past each drop, where the step no longer counts
-        cand = np.concatenate((_alphas(grid), above[above < s.alpha]))
+        cand = np.concatenate((alphas_of(grid), above[above < s.alpha]))
         cand = np.sort(cand[cand < s.alpha])[::-1]
         inside = np.flatnonzero(ratios(s, cand) <= 1.0)
         if not inside.size:
             return Headroom(-math.inf)
         j = inside[0]
         edge = _edge(s, cand[j], cand[j - 1] if j else s.alpha)
-    edge_db = float(_drives(edge))
+    edge_db = float(drives_of(edge))
     return Headroom(edge_db - drive_db, edge_db)
 
 

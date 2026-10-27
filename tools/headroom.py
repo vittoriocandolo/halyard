@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from halyard_synth.patch import from_dict
-from halyard_synth.render import DRIVE_MAX, HEADROOM_STEP_DB, _drives, domain, render, synthesize
+from halyard_synth.render import DRIVE_MAX, HEADROOM_STEP_DB, domain, drives_of, render, synthesize
 from tools import grid, say
 
 if TYPE_CHECKING:
@@ -62,7 +62,7 @@ def candidates(knees: Knees, d0: float, *, up: bool) -> list[float]:
     """Return the drives the report's search visits, in search order."""
     drops = knees.drops()
     sides = np.concatenate((drops * (1.0 - SIDE), drops * (1.0 + SIDE)))
-    jumps = [float(d) for d in _drives(sides)]
+    jumps = [float(d) for d in drives_of(sides)]
     if up:
         steps = [*(float(d) for d in np.arange(d0 + HEADROOM_STEP_DB, DRIVE_MAX, HEADROOM_STEP_DB)), DRIVE_MAX]
         return sorted({d for d in steps + jumps if d0 < d <= DRIVE_MAX})
