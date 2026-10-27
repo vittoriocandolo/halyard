@@ -8,7 +8,7 @@ import math
 import numpy as np
 import pytest
 
-from halyard_synth import reference
+from halyard_synth import reference, render
 from halyard_synth.patch import loads
 from halyard_synth.render import synthesize
 
@@ -131,3 +131,22 @@ def test_compare() -> None:
     quiet = np.array([0.0, 1e-3, 0.0])
     assert reference.compare(quiet + 5e-8, quiet).passes()  # near-silent: the absolute bound applies
     assert not reference.compare(quiet + 5e-7, quiet).passes()
+
+
+def test_verification_with_explicit_taps() -> None:
+    """Verify with the shipped taps given explicitly, the reference using them too, as the grid's 16× runs do."""
+    p = loads(EXAMPLE)
+    taps = render.decimator(48000).taps
+    v = reference.verify_take(p, taps=taps)
+    assert v.passed
+    assert np.array_equal(reference.reference(p, taps=taps).out, reference.reference(p).out)
+    assert v.leakage_db <= LEAKAGE_DB
+
+
+def test_a_near_silent_take_is_judged_absolutely() -> None:
+    """Verify a take whose peak is under 0.01 against the absolute bound, and say so."""
+    quiet = make(**{"body.level_db": -60.0, "noise[1].level_db": -70.0, "noise[2].level_db": -70.0})
+    v = reference.verify_take(quiet)
+    assert v.error.near_silent
+    assert v.passed
+    assert "near-silent: limit 1e-07" in str(v)

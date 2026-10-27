@@ -217,7 +217,15 @@ def test_source_length_and_sample_count() -> None:
     length_s, samples = 0.26, 399361  # the wires end at 260 ms
     assert v.t_src == length_s
     assert voice.sample_count(length_s, RATE) == samples
-    for t, rate in ((0.26, 1411200), (1e-5, 1536000), (0.0, 1536000), (2.0, 3072000)):
+    # The last two: t·F rounds below a whole number it reaches, and above one it falls short of.
+    for t, rate in (
+        (0.26, 1411200),
+        (1e-5, 1536000),
+        (0.0, 1536000),
+        (2.0, 3072000),
+        (1.0629251700680271e-05, 1411200),
+        (3.543083900226757e-06, 1411200),
+    ):
         n = voice.sample_count(t, rate)
         assert (n - 1) / rate <= t < n / rate
 
@@ -359,6 +367,33 @@ def test_rattle_modulates_at_the_fundamental_with_its_depth(depth: float) -> Non
     coef, *_ = np.linalg.lstsq(np.stack([np.ones_like(t), np.cos(phi), np.sin(phi)]).T, q, rcond=None)
     assert 2 * coef[1] == pytest.approx(depth, rel=DEPTH)
     assert abs(coef[2]) <= SIDE
+
+
+def test_a_rattle_outside_the_body_shape_is_not_gated() -> None:
+    """Gate a layer only where the body's shape is: one that ends before it starts plays as it is."""
+    p = rattle_patch(
+        0.8,
+        **{
+            "noise[1].level_db": -6.0,
+            "noise[1].rattle": 0.8,
+            "noise[1].amp": amp((0, 0), (1, 1), (8, 0)),
+            "body.amp": amp((10, 0), (20, 1), (390, 1), (400, 0)),
+        },
+    )
+    v = voice.voice(p)
+    tabs = voice.tables(v, RATE)
+    n0, n1 = 0, int(0.03 * RATE)  # past the stick, into the body's shape
+    stick = tabs[0]
+    assert stick is not None
+    plain = 10 ** (p.noise[0].level_db / 20) * v.layers[0].amp.on(np.arange(n0, n1) / RATE) * stick[n0:n1]
+    gated = voice.sources(v, RATE, n0, n1, tabs) - voice.sources(
+        dataclasses.replace(v, layers=(v.layers[1],)),
+        RATE,
+        n0,
+        n1,
+        tabs[1:],
+    )
+    np.testing.assert_allclose(gated, plain, rtol=0, atol=EXACT)
 
 
 def test_no_rattle_without_depth_or_body_shape() -> None:

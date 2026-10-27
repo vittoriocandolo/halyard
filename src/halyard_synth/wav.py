@@ -161,7 +161,7 @@ def read(path: str | os.PathLike[str]) -> Wav:
     raw = found[b"data"]
     frame = channels * bits // 8 if bits % 8 == 0 and channels > 0 else 0
     if not frame:
-        msg = f"{path}: unsupported format ({channels} channels, {bits} bits)"
+        msg = f"{path}: unsupported format, {bits}-bit samples in {channels} channel{'' if channels == 1 else 's'}"
         raise ValueError(msg)
     raw = raw[: len(raw) // frame * frame]
     samples: NDArray[Any]

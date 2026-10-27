@@ -232,10 +232,6 @@ class Hits:
         with self._lock:
             return self._offers[slot]
 
-    def wait(self) -> float:
-        """Seconds until the next hit."""
-        return 0.0 if self.next_hit is None else max(0, self.next_hit - self.clock) / self.rate
-
     def _take_offers(self) -> None:
         """Take every offer newer than its slot's buffers."""
         with self._lock:
@@ -288,10 +284,9 @@ class Hits:
             else:
                 self.next_hit += buf.size + round(GAP_S * self.rate)
         playing = []
-        for start, buf in self.voices:
+        for start, buf in self.voices:  # each still rings in this block, or starts in it
             a, b = max(self.clock, start), min(end, start + buf.size)
-            if a < b:
-                out[a - self.clock : b - self.clock] += buf[a - start : b - start]
+            out[a - self.clock : b - self.clock] += buf[a - start : b - start]
             if start + buf.size > end:
                 playing.append((start, buf))
         self.voices = playing
@@ -437,9 +432,9 @@ class Session:
             raise AuditionError(msg) from None
 
     def _render(self, text: str) -> Rendered:
-        """Render a patch's takes as they would be written."""
+        """Render a patch's takes as they would be written; an over render, never written, is left as it is."""
         audio, report = render_takes(loads(text), self.takes)
-        return playable(audio, report), report
+        return (audio if report.over else playable(audio, report)), report
 
     def _say(self, slot: int, generation: int | None, message: str) -> None:
         """Report about a slot, tagged by its file and its generation."""

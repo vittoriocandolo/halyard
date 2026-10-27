@@ -127,6 +127,9 @@ def test_overs_are_reported_never_clipped() -> None:
     assert "over full scale" in str(report)
     assert "lower output.db by at least" in str(report)
     assert not render.render(make(**{"output.mode": "peak", "output.db": 0.0, "drive.db": 12.0}))[1].over
+    takes = render.render_takes(make(**{"output.db": 12.0, "drive.db": 12.0}), 2)[1]
+    assert takes.over
+    assert "peak     +" in str(takes)  # a set's report says how far over it is, once
 
 
 def test_a_longer_layer_never_changes_earlier_samples() -> None:
@@ -412,3 +415,31 @@ def test_take_seeds_stay_in_range() -> None:
     for bad in (0, 129, True):
         with pytest.raises(render.RenderError, match="needs 1 to 128 takes"):
             render.take_seeds(make(), bad)
+
+
+def test_the_loudest_outputs_are_picked_apart() -> None:
+    """Pick the largest values first, never two neighbours nor a neighbour of one already taken, and never a zero."""
+    mags = np.array([3.0, 2.0, 1.0, 0.0, 5.0])
+    assert render.loudest(mags, 10, 4, []) == [14, 10, 12]
+    assert render.loudest(mags, 10, 4, [13]) == [10]  # 14 and 12 are 13's neighbours
+    assert render.loudest(mags, 10, 1, []) == [14]
+    assert render.loudest(mags[:3], 10, 4, []) == [10, 12]  # every candidate seen, fewer picked than asked
+
+
+def test_a_silent_set_reports_each_take_silent() -> None:
+    """Report every take of a silent set as silent, with nothing to say about aliasing."""
+    report = render.render_takes(make(**SILENT), 2)[1]
+    text = str(report)
+    assert text.count("seed 1: silent") == 1
+    assert text.count("seed 2: silent") == 1
+    assert "mostly" not in text
+    assert all(t.detail(report.drive_db) is None for t in report.takes)
+
+
+def test_explicit_taps_are_used_as_given() -> None:
+    """Synthesize with taps given explicitly, the shipped ones or others, and find them used."""
+    p = loads(EXAMPLE)
+    shipped = render.decimator(48000).taps
+    assert np.array_equal(render.synthesize(p, taps=shipped).out, render.synthesize(p).out)
+    halved = render.synthesize(p, taps=shipped / 2).out
+    np.testing.assert_allclose(halved, render.synthesize(p).out / 2, rtol=1e-12, atol=1e-15)

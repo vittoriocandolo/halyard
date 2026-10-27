@@ -3,10 +3,11 @@
 
 """The patch: parsing, every problem it names, canonical TOML, and the editing commands (plan §4, §5)."""
 
+import copy
 import dataclasses
 import math
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -15,7 +16,7 @@ from halyard_synth import cli, patch
 from halyard_synth.curve import amplitude_curve, pitch_curve
 from halyard_synth.patch import PatchError, dumps, from_dict, loads
 
-from .conftest import EXAMPLE, make
+from .conftest import EXAMPLE, edit, make
 
 type Knots = list[dict[str, float]]
 
@@ -794,3 +795,50 @@ def test_softer_ladders_on_every_reference(name: str) -> None:
             assert b.band_hz[1] == pytest.approx(a.band_hz[1] * v**0.2, abs=BAND_HZ)
         if db:
             close(patch.softer(patch.softer(p, db / 2), db / 2), q)
+
+
+def test_numbers_too_large_for_a_float_are_named() -> None:
+    """Name an integer too large for a float, wherever a float is read from it."""
+    huge = 10**400
+    assert "body.tune_hz: is too large" in reject(**{"body.tune_hz": huge})
+    assert "body.modes[2].ratio: is too large" in reject(**{"body.modes[2].ratio": huge})
+
+
+def test_wrongly_typed_tables_are_named(example_dict: dict[str, Any]) -> None:
+    """Name a table, an array of tables or a pair that is the wrong kind of value."""
+    assert problems(from_dict, [example_dict]) == ["expected a table"]
+    for path, value, message in (
+        ("drive", 5, "drive: expected a table, found int"),
+        ("body.amp", "x", "body.amp: expected an array of { ms, gain } tables, found a string"),
+        ("body.modes", [1, 2], "body.modes[1]: expected a { ratio, level_db } table, found int"),
+        ("body.pitch", [{"ms": 0.0}], "body.pitch[1].ratio: missing"),
+        ("noise[1].amp", {"ms": 0}, "noise[1].amp: expected an array of { ms, gain } tables, found a table"),
+    ):
+        assert message in problems(from_dict, edit(copy.deepcopy(example_dict), path, value))
+
+
+def test_programmatic_parts_must_have_their_types() -> None:
+    """Name a part built in code with the wrong type: sections, layers, knots and modes."""
+    p = loads(EXAMPLE)
+    body = p.body
+    knots = cast("Any", [(0.0, 0.0)])  # deliberately wrong: a list, not a tuple of pairs
+    single = cast("Any", ((1.0,),))  # deliberately wrong: a mode of one number
+    cases: list[tuple[dict[str, object], str]] = [
+        ({"body": None}, "body: expected a body section"),
+        ({"noise": [p.noise[0]]}, "noise: expected noise layers"),
+        ({"drive": None}, "drive: expected a drive section"),
+        ({"output": None}, "output: expected an output section"),
+        ({"body": dataclasses.replace(body, amp=knots)}, "body.amp: expected (ms, gain) knots"),
+        ({"body": dataclasses.replace(body, modes=single)}, "body.modes: expected (ratio, level_db) modes"),
+    ]
+    for fields, message in cases:
+        assert message in problems(dataclasses.replace, p, **fields)
+
+
+def test_softer_keeps_the_knots_inside_a_rise_in_their_place() -> None:
+    """Lengthen a rise of several knots in proportion, every knot inside it keeping its place."""
+    p = make(**{"noise[1].amp": amp((0, 0), (0.05, 0.5), (0.1, 1), (3, 0.1), (8, 0))})
+    rise = patch.softer(p, 12, glide=0).noise[0].amp
+    factor = 10 ** (12 / 20 * 0.2)
+    assert rise[2][0] == pytest.approx(0.1 * factor, abs=1e-3)
+    assert rise[1][0] == pytest.approx(rise[2][0] / 2, abs=1e-3)

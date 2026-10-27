@@ -86,11 +86,10 @@ def band_limited(v: Voice, rate: int, n_start: int, n_stop: int, m: int) -> Floa
 
 
 def _sources(v: Voice, rate: int, n0: int, n1: int, tabs: list[Floats | None]) -> Floats:
-    """Return X over [n0, n1), silent before the trigger."""
+    """Return X over [n0, n1), silent before the trigger; every segment reaches past it."""
     x = np.zeros(n1 - n0)
-    if n1 > 0:
-        a = max(n0, 0)
-        x[a - n0 :] = sources(v, rate, a, n1, tabs)
+    a = max(n0, 0)
+    x[a - n0 :] = sources(v, rate, a, n1, tabs)
     return x
 
 

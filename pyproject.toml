@@ -57,6 +57,15 @@ markers = [
     "slow: long-running checks (reference renders of long patches)",
 ]
 
+[tool.coverage.run]
+source_pkgs = ["halyard_synth"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 100  # every line and every branch: each behavior has a test
+show_missing = true
+skip_covered = true
+
 [tool.ruff]
 line-length = 120
 
@@ -73,3 +82,6 @@ allowed-confusables = ["×", "−", "–", "α", "γ", "ρ", "σ", "′"]  # mat
 
 [tool.ruff.lint.flake8-copyright]
 notice-rgx = '(?m)^# Copyright \(C\) \d{4}(-\d{4})? .+\n# SPDX-License-Identifier: GPL-3\.0-or-later$'  # the copyright line, then the license identifier
+
+[tool.typos.default.extend-words]
+writeable = "writeable"  # NumPy's spelling, in ndarray.flags

@@ -4,7 +4,11 @@
 """The command line: every command, its output, and what it refuses (plan §7.6)."""
 
 import dataclasses
+import io
+import runpy
+import sys
 from pathlib import Path
+from typing import override
 
 import numpy as np
 import pytest
@@ -260,3 +264,57 @@ def test_verify(capsys: pytest.CaptureFixture[str], example: Path) -> None:
     assert code == 0
     assert "take 2, seed 2" in out
     assert "2 of 2 takes pass" in out
+
+
+def test_extract_refuses_what_is_not_a_wave_file(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    """Refuse to extract from a file that is not RIFF WAVE, or is not there."""
+    text = tmp_path / "notes.txt"
+    text.write_text("not audio", encoding="utf-8")
+    code, _, err = run(capsys, "extract", text)
+    assert code == BAD_INPUT
+    assert "not a RIFF WAVE file" in err
+    code, _, err = run(capsys, "extract", tmp_path / "missing.wav")
+    assert code == BAD_INPUT
+    assert "missing.wav" in err
+
+
+def test_audition_from_the_command_line(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    """Pass audition's options through, and refuse beats, tempi and numbers that cannot be."""
+    code, _, err = run(capsys, "audition", tmp_path / "missing.toml", "--bpm", 120, "--beats", "3,1")
+    assert code == BAD_INPUT
+    assert "missing.toml" in err
+    for args, message in (
+        (["--beats", "two"], "expected beats such as 2,4"),
+        (["--beats", "0,2"], "beats of a 4/4 bar are 1 to 4"),
+        (["--bpm", "0"], "--bpm must be positive"),
+        (["--bpm", "fast"], "expected a number"),
+        (["--bpm", "inf"], "expected a finite number"),
+    ):
+        with pytest.raises(SystemExit) as e:
+            cli.main(["audition", "x.toml", *args])
+        assert e.value.code == BAD_INPUT
+        assert message in capsys.readouterr().err
+
+
+def test_a_reader_that_goes_away_ends_the_command_quietly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """End with status 0, saying nothing, when the output closes, as `halyard init crack | head` does."""
+
+    class Gone(io.StringIO):
+        @override
+        def write(self, s: str) -> int:
+            raise BrokenPipeError
+
+    errors = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", Gone())
+    monkeypatch.setattr(sys, "stderr", errors)
+    assert cli.main(["init", "crack"]) == 0
+    assert errors.closed
+
+
+def test_the_package_runs_as_the_command(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Run `python -m halyard_synth` as the halyard command, exiting with its status."""
+    monkeypatch.setattr(sys, "argv", ["halyard", "init", "snap"])
+    with pytest.raises(SystemExit) as e:
+        runpy.run_module("halyard_synth", run_name="__main__")
+    assert e.value.code == 0
+    assert loads(capsys.readouterr().out) == loads(cli.reference_text("snap"))

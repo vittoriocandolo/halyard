@@ -303,9 +303,6 @@ def build(
     for i, ((name, p), (lo, hi)) in enumerate(zip(patches, ranges, strict=True)):
         volume, curve = curve_for(relative[i], lo, hi)
         files = tuple(output_stage(o, set_gain * g, p.output.polarity) for o, g in zip(outs[i], gains[i], strict=True))
-        if not all(np.all(np.isfinite(a)) for a in files):
-            msg = "the render produced non-finite samples"
-            raise RenderError(msg)
         audio.append(files)
         layers.append(
             Layer(

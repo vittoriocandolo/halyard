@@ -100,10 +100,6 @@ class Voice:
         """Some audible layer reads the body's shape and phase."""
         return any(layer.gain and layer.rattle for layer in self.layers)
 
-    def bands(self) -> list[tuple[float, float]]:
-        """Return the bands of the audible layers, whose noise tables a render needs."""
-        return [layer.band for layer in self.layers if layer.gain]
-
 
 def _seconds(knots: Iterable[tuple[float, float]]) -> list[float]:
     """Return the knots' times in seconds."""
@@ -303,10 +299,8 @@ class Slew:
         return float(self.knees.at(alpha))
 
 
-def internal(v: Voice, rate: int, count: int, tabs: Tables | None = None) -> tuple[Floats, Slew]:
+def internal(v: Voice, rate: int, count: int, tabs: Tables) -> tuple[Floats, Slew]:
     """Return y[n] = y(n / rate) for 0 ≤ n < count, in blocks aligned to n = 0, and the slew of x."""
-    if tabs is None:
-        tabs = tables(v, rate)
     y = np.empty(count)
     prev, peak = 0.0, 0.0  # silence before the trigger
     crossing, crest, crest_x, steep = 0.0, 0, 0.0, 0

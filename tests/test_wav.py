@@ -5,6 +5,7 @@
 
 import json
 import math
+import re
 import struct
 import warnings
 import wave
@@ -337,3 +338,31 @@ def test_pcm_keeps_room_for_dither() -> None:
     over = render.render(make(**{"output.db": round(gain_db, 6), "output.format": "pcm16"}))[1]
     assert over.over
     assert "16-bit ceiling" in str(over)
+
+
+def riff(*chunks: tuple[bytes, bytes]) -> bytes:
+    """Build a RIFF WAVE file from its chunks."""
+    body = b"".join(cid + struct.pack("<I", len(data)) + data + b"\0" * (len(data) % 2) for cid, data in chunks)
+    return b"RIFF" + struct.pack("<I", 4 + len(body)) + b"WAVE" + body
+
+
+def test_every_file_the_reader_refuses_is_named(tmp_path: Path) -> None:
+    """Refuse what is not RIFF WAVE, a file without fmt or data, and a frame that is not whole bytes."""
+    fmt = struct.pack("<HHIIHH", wav.PCM, 1, RATE, 2 * RATE, 2, 16)
+    odd_bits = struct.pack("<HHIIHH", wav.PCM, 1, RATE, 2 * RATE, 2, 12)
+    no_channels = struct.pack("<HHIIHH", wav.PCM, 0, RATE, 0, 0, 16)
+    for name, data, message in (
+        ("text.wav", b"not a wave file", "not a RIFF WAVE file"),
+        ("short.wav", b"RIFF", "not a RIFF WAVE file"),
+        ("aiff.wav", b"FORM\0\0\0\4AIFF", "not a RIFF WAVE file"),
+        ("nofmt.wav", riff((b"data", b"\0\0")), "missing fmt or data chunk"),
+        ("nodata.wav", riff((b"fmt ", fmt)), "missing fmt or data chunk"),
+        ("12bit.wav", riff((b"fmt ", odd_bits), (b"data", b"\0\0")), "unsupported format, 12-bit samples in 1 channel"),
+        ("empty.wav", riff((b"fmt ", no_channels), (b"data", b"")), "unsupported format, 16-bit samples in 0 channels"),
+    ):
+        path = tmp_path / name
+        path.write_bytes(data)
+        with pytest.raises(ValueError, match=re.escape(message)):
+            wav.read(path)
+    with pytest.raises(ValueError, match="expected a mono buffer"):
+        wav.write(tmp_path / "x.wav", np.zeros((4, 2), dtype=np.float32), wav.Format(RATE))

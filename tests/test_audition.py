@@ -5,8 +5,10 @@
 
 import io
 import os
+import sys
 import threading
 import time
+import types
 from collections.abc import Callable
 from pathlib import Path
 from typing import override
@@ -542,3 +544,142 @@ def test_clipping_is_flagged(tmp_path: Path, example: Path) -> None:
     log.clear()
     audition.Session(example, audition.Settings(against=faint), out=Collect(log))
     assert "which the device will clip" in "".join(log)
+
+
+def test_a_watcher_ignores_an_unchanged_or_unreadable_file(tmp_path: Path) -> None:
+    """Start nothing when a file is unchanged since the last look, or cannot be read."""
+    path = tmp_path / "snare.toml"
+    path.write_text("v0", encoding="utf-8")
+    requests: list[str] = []
+
+    def done(generation: int, result: object, elapsed: float, *, newest: bool) -> None:
+        requests.append(f"{generation} {result} {elapsed > 0} {newest}")
+
+    w = audition.Watcher(path, lambda text: text, done)
+    w.poll()  # the first look reads it
+    wait_for(lambda: requests)
+    w.poll()  # unchanged: not even read
+    path.unlink()
+    w.poll()  # gone: nothing to read
+    assert w.generation == 1
+
+
+def test_a_finished_render_is_reported_for_what_it_is(example: Path) -> None:
+    """Report a dropped render, a failed one, one over full scale and one at another rate, playing on."""
+    log: list[str] = []
+    session = audition.Session(example, out=Collect(log))
+    done = session.watchers[0].done
+    done(1, None, 0.1, newest=False)
+    done(2, ValueError("a bug"), 0.1, newest=True)
+    done(3, render_takes(loads(EXAMPLE.replace("db          = -6.0", "db          = 12.0"))), 0.1, newest=True)
+    done(4, render_takes(loads(EXAMPLE.replace("sample_rate = 48000", "sample_rate = 44100"))), 0.1, newest=True)
+    text = "".join(log)
+    assert "[1] dropped: a newer edit is rendering" in text
+    assert "[2] render failed, still playing the last valid one: a bug" in text
+    assert "[3] over full scale by" in text
+    assert "[4] sample rate 44100 Hz, but audition plays at 48000 Hz" in text
+    offer = session.hits.offered(0)
+    assert offer is not None
+    assert offer.generation == 0  # none of them is offered: the first render plays on
+
+
+def test_an_over_pcm_patch_is_refused_as_over(tmp_path: Path) -> None:
+    """Refuse a PCM patch over full scale as over, as a float one is, before any device opens."""
+    path = tmp_path / "loud.toml"
+    loud = EXAMPLE.replace('"float32"     #', '"pcm16"       #').replace("db          = -6.0", "db          = 12.0")
+    path.write_text(loud, encoding="utf-8")
+
+    def no_device(rate: int, channels: int, fill: Callable[[int], Audio]) -> io.StringIO:
+        raise AssertionError((rate, channels, fill))
+
+    assert audition.audition([path], stream_factory=no_device, out=Collect([])) == REFUSED
+
+
+def test_a_session_refuses_a_missing_patch_and_a_bed_of_three_channels(tmp_path: Path, example: Path) -> None:
+    """Refuse a patch file that is not there, and a bed of more than two channels."""
+    assert audition.audition([tmp_path / "missing.toml"], out=Collect([])) == BAD_INPUT
+    surround = write_wav(tmp_path / "surround.wav", np.full((96000, 3), 0.01), DEVICE)
+    with pytest.raises(audition.AuditionError, match="3 channels; a bed must be mono or stereo"):
+        audition.Session(example, audition.Settings(bpm=120.0, bed=surround), out=Collect([]))
+
+
+def test_blind_pairs_are_named_as_they_start(tmp_path: Path, example: Path) -> None:
+    """Name each blind pair when it starts, and poll no file when not watching."""
+    other, _ = render(loads(EXAMPLE.replace("tune_hz  = 185.0", "tune_hz  = 230.0")))
+    sample = write_wav(tmp_path / "sample.wav", other, DEVICE)
+    log: list[str] = []
+    settings = audition.Settings(bpm=120.0, against=sample, blind=True)
+    session = audition.Session(example, settings, rng=np.random.default_rng(1), out=Collect(log))
+    session.hits.fill(4 * DEVICE)  # two bars: four hits, two pairs
+    session.poll()
+    assert "".join(log).count("pair ") == len(session.hits.order)
+
+
+def test_audition_polls_until_interrupted(monkeypatch: pytest.MonkeyPatch, example: Path) -> None:
+    """Poll the session between sleeps, until a keyboard interrupt stops it."""
+    naps: list[float] = []
+    polls = 3
+
+    def nap(seconds: float) -> None:
+        naps.append(seconds)
+        if len(naps) == polls:
+            raise KeyboardInterrupt
+
+    class Stream:
+        def __init__(self, _rate: int, _channels: int, _fill: Callable[[int], Audio]) -> None:
+            pass
+
+        def __enter__(self) -> None:
+            return None
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    monkeypatch.setattr(time, "sleep", nap)
+    assert audition.audition([example], audition.Settings(watch=True), stream_factory=Stream, out=Collect([])) == 0
+    assert naps == [audition.POLL_S] * polls
+
+
+class RefusedError(Exception):
+    """The fake device's PortAudio error."""
+
+
+def fake_sounddevice(rates: set[int], opened: list[dict[str, object]]) -> types.SimpleNamespace:
+    """Make a stand-in for sounddevice that accepts these rates and records the streams it opens."""
+
+    def check_output_settings(*, samplerate: int, channels: int, dtype: str) -> None:
+        if samplerate not in rates:
+            msg = f"invalid sample rate {samplerate} for {channels} channels of {dtype}"
+            raise RefusedError(msg)
+
+    def output_stream(**settings: object) -> dict[str, object]:
+        opened.append(settings)
+        return settings
+
+    return types.SimpleNamespace(
+        check_output_settings=check_output_settings,
+        PortAudioError=RefusedError,
+        OutputStream=output_stream,
+    )
+
+
+def test_the_device_stream_plays_the_mix_or_says_why_it_cannot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Open a stream at exactly the rate whose callback plays the mix; say so when PortAudio or the rate is missing."""
+    opened: list[dict[str, object]] = []
+    device = fake_sounddevice({DEVICE}, opened)
+
+    monkeypatch.setitem(sys.modules, "sounddevice", device)
+    audition.device_stream(DEVICE, STEREO, lambda frames: np.full((frames, STEREO), 0.25, dtype=np.float32))
+    (settings,) = opened
+    assert (settings["samplerate"], settings["channels"], settings["dtype"]) == (DEVICE, STEREO, "float32")
+    outdata = np.zeros((8, STEREO), dtype=np.float32)
+    callback = settings["callback"]
+    assert callable(callback)
+    callback(outdata, 8, None, None)
+    assert np.all(outdata == np.float32(0.25))
+    with pytest.raises(RuntimeError, match="does not support 44100 Hz"):
+        audition.device_stream(44100, 1, lambda frames: np.zeros(frames, dtype=np.float32))
+
+    monkeypatch.setitem(sys.modules, "sounddevice", None)  # as if it were not installed
+    with pytest.raises(RuntimeError, match="needs the sounddevice package and PortAudio"):
+        audition.device_stream(DEVICE, 1, lambda frames: np.zeros(frames, dtype=np.float32))

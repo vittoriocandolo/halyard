@@ -219,7 +219,7 @@ class Synthesis:
     probes: Probes | None = field(default=None, compare=False, repr=False)
 
 
-def _loudest(mags: Floats, first: int, n: int, taken: list[int]) -> list[int]:
+def loudest(mags: Floats, first: int, n: int, taken: list[int]) -> list[int]:
     """Return up to n indices of the largest nonzero values, apart from each other and from `taken`."""
     picked: list[int] = []
     for i in np.argsort(mags)[::-1][:256]:
@@ -245,27 +245,25 @@ class Grid(NamedTuple):
 def _probes(g: Grid, out: Floats, slew: Slew) -> Probes | None:
     """Choose the probes for a render, and keep the saturator's input under their windows."""
     v, rate, factor, taps, count, tabs = g
-    picked = _loudest(np.abs(out), 0, PROBES, [])
+    picked = loudest(np.abs(out), 0, PROBES, [])
     # The output just after the crest without drive, and just after the steepest crossing at full drive,
     # computed exactly from x (the decimator's delay at low frequencies is a few outputs).
     a_max = drive_alpha(DRIVE_MAX)
     for n, alpha in ((slew.crest, 0.0), (slew.steep, a_max)):
+        # The crest and the crossing are internal samples, so the output reaches past them.
         m0, m1 = max(0, n // factor - 8), min(out.size, n // factor + 24)
-        if m1 <= m0:
-            continue
         n0 = max(0, m0 * factor - taps.size + 1) // factor * factor
         n1 = min(count, (m1 - 1) * factor + 1)
         x = sources(v, rate, n0, n1, tabs)
         y = np.tanh(alpha * x) / np.tanh(alpha) if alpha else x
         near = upfirdn(taps, y, down=factor)[m0 - n0 // factor : m1 - n0 // factor]
-        picked += _loudest(np.abs(near), m0, PROBES, picked)
+        picked += loudest(np.abs(near), m0, PROBES, picked)
     # out[m] = Σ_n h[mK − n] · y[n] over the internal samples 0 ≤ n < count that the filter reaches.
+    # Every output reaches at least the last internal sample, so no span is empty.
     spans: list[tuple[int, int, int]] = []
     for m in picked:
         top = m * factor
-        n0, n1 = max(0, top - taps.size + 1), min(top, count - 1) + 1
-        if n1 > n0:
-            spans.append((m, n0, n1))
+        spans.append((m, max(0, top - taps.size + 1), min(top, count - 1) + 1))
     if not spans:
         return None
     merged: list[list[int]] = []
@@ -549,11 +547,9 @@ class Take:
     def detail(self, drive_db: float) -> str | None:
         """Say what the prediction comes from, and what drive would change the status."""
         c, h, d = self.cause, self.headroom, self.domain
-        if c.dominant is None or not d.predicted:
+        if c.dominant is None or not d.predicted or h is None:  # no headroom is found only for silence
             return None
         text = "mostly saturation" if c.dominant == "saturation" else f"mostly kinks, {c.where}"
-        if h is None:
-            return text
         if h.db == math.inf:
             return f"{text}; inside at every drive up to {DRIVE_MAX:g} dB"
         if h.db == -math.inf:
@@ -751,9 +747,6 @@ def render_takes(p: Patch, takes: int = 1, *, level_match: bool = False) -> tupl
     rows: list[Take] = []
     for j, (seed, s, g) in enumerate(zip(seeds, synths, take_gains, strict=True), 1):
         a = output_stage(s.out, gain * g, p.output.polarity)
-        if not np.all(np.isfinite(a)):
-            msg = "the render produced non-finite samples"
-            raise RenderError(msg)
         d = domain(s)
         audio.append(a)
         rows.append(
@@ -805,15 +798,12 @@ def quantize(audio: NDArray[np.float32], bits: int, seed: int) -> NDArray[np.int
     """Round to `bits`-bit PCM with the seed's TPDF dither of ±1 LSB.
 
     Exact zeros stay zero, so the silent first sample and any digital silence
-    stay silent. The output stage keeps the peak 2 LSB below full scale, so
-    the dithered value always fits.
+    stay silent. A render that is not over keeps its peak 2 LSB below full
+    scale, so the dithered value always fits; an over one is never written.
     """
     top = 2 ** (bits - 1)
     x = audio.astype(float) * top
     q = np.round(np.where(x != 0.0, x + noise.dither(seed, x.size), 0.0))
-    if q.size and (q.max() > top - 1 or q.min() < -top):
-        msg = f"the render does not fit {bits}-bit PCM"
-        raise RenderError(msg)
     return q.astype(np.int32)
 
 

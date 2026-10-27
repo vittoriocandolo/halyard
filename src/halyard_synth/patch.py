@@ -383,7 +383,7 @@ def _keys(problems: _Problems, prefix: str, table: dict[str, Any], expected: Seq
 
 
 def _float[T](v: T) -> T | float:
-    """Return TOML integers are accepted for floats; anything else is left for validation to name."""
+    """Return a TOML integer as a float, which floats accept; anything else is left for validation to name."""
     if isinstance(v, int) and not isinstance(v, bool):
         try:
             return float(v)

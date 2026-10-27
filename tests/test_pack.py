@@ -17,6 +17,8 @@ from halyard_synth import cli, pack, wav
 from halyard_synth.loudness import momentary_max
 from halyard_synth.patch import dumps, loads, softer
 
+from .conftest import EXAMPLE
+
 type Opcodes = dict[str, str]
 
 TOP = 127  # the highest velocity
@@ -26,6 +28,7 @@ LAW_DB = 0.01  # the level follows the square law within this, measured from the
 STEP_DB = 0.02  # and never steps more than one velocity's step past it across a boundary
 PEAK_DB = 1e-6  # in peak mode the loudest file is at its target
 MATCHED_DB = 0.01  # level matching brings a layer's takes within this
+LOUD_DB = 6.0  # some players stop a group's volume here
 
 
 def parse_sfz(text: str) -> list[tuple[str, Opcodes]]:
@@ -229,3 +232,35 @@ def test_the_command_writes_a_pack(ladder: list[Path], tmp_path: Path, capsys: p
     code = cli.main(["pack", str(ladder[1]), str(ladder[0]), "--out", str(tmp_path / "bad")])
     assert code == cli.CliError("").status
     assert "not softer" in capsys.readouterr().err
+
+
+def test_a_loud_group_volume_is_flagged(ladder: list[Path]) -> None:
+    """Warn when a layer's group volume passes +6 dB, which some players do not reach."""
+    loud = loads(ladder[0].read_text(encoding="utf-8"))
+    pk = pack.build([("loud", loud), ("far", softer(loud, 18))])
+    assert pk.layers[1].volume_db > LOUD_DB
+    assert any("its group volume is" in line for line in pk.lines("kit"))
+
+
+def test_the_command_refuses_what_it_cannot_pack(
+    ladder: list[Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Refuse no patch, a missing or invalid patch, a key outside MIDI's, and a pack over full scale: write nothing."""
+    with pytest.raises(pack.PackError, match="at least one patch"):
+        pack.build([])
+    invalid = tmp_path / "invalid.toml"
+    invalid.write_text("schema = 1\n", encoding="utf-8")
+    over = tmp_path / "over.toml"
+    over.write_text(EXAMPLE.replace("db          = -6.0", "db          = 12.0"), encoding="utf-8")  # 6 dB over
+    out = tmp_path / "kit"
+    for paths, options, status, message in (
+        ([tmp_path / "missing.toml"], pack.Options(), 2, "missing.toml"),
+        ([invalid], pack.Options(), 2, "invalid patch"),
+        ([ladder[0]], pack.Options(key=128), 2, "--key: 128 is not a MIDI key"),
+        ([over], pack.Options(), 1, "not written: the loudest file peaks at"),
+    ):
+        assert pack.pack(map(str, paths), out, options) == status
+        assert message in capsys.readouterr().err
+    assert not out.exists()
