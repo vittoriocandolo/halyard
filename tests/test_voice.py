@@ -1,58 +1,82 @@
 # Copyright (C) 2026 Vittorio Candolo
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+"""The voice: the saturator, the model of body, layers and rattle, the knee slew and the kink bound (§2.3–§2.5, §5)."""
+
 import dataclasses
+import functools
 import math
+from collections.abc import Callable
 
 import numpy as np
 import pytest
+from numpy.typing import ArrayLike, NDArray
 from scipy.optimize import least_squares
 
 from halyard_synth import noise, voice
 from halyard_synth.curve import amplitude_curve, compressed, pitch_curve
-from halyard_synth.patch import loads
+from halyard_synth.patch import Patch, loads
 
 from .conftest import EXAMPLE, make
 
+type Floats = NDArray[np.float64]
+type Knots = list[dict[str, float]]
+
 RATE = 1536000  # 48 kHz at 32×
+EXACT = 1e-12  # the sources are the model to this
+CENTS = 0.001  # every mode sounds at its ratio of the tuning to this
+DECAY = 1e-3  # a mode's decay rate is ratio^β times the fundamental's to this, relatively
+DEPTH = 0.01  # the rattle's measured depth is its own to this, relatively
+SIDE = 1e-9  # and nothing of it is out of phase with the fundamental
+JUMP = 2e-3  # the jumps agree with one-sided derivatives of the model to this, relatively
+DRIVEN_JUMP = 5e-3  # and through the saturator, where rounding meets the fit, to this
+AT_KNOTS = 1e-5  # the kink terms hold x at their knots to this
+BAND = 24000.0  # the decimator's band at 48 kHz, for the kink bound
+ZETA3 = 1.2020569031595942
+AUDIBLE = 0.1  # the noise is read where it is at least this, so the gate is measured well
 
 
-def amp(*points):
+def amp(*points: tuple[float, float]) -> Knots:
+    """Write a shape's knots as TOML parses them."""
     return [{"ms": m, "gain": g} for m, g in points]
 
 
-def pitch(*points):
+def pitch(*points: tuple[float, float]) -> Knots:
+    """Write a pitch curve's knots as TOML parses them."""
     return [{"ms": m, "ratio": r} for m, r in points]
 
 
-def modes(*pairs):
+def modes(*pairs: tuple[float, float]) -> Knots:
+    """Write modes as TOML parses them."""
     return [{"ratio": r, "level_db": v} for r, v in pairs]
 
 
-def silent_layers(**edits):
+def silent_layers(**edits: object) -> dict[str, object]:
+    """Return edits that silence both layers, and these."""
     return {"noise[1].level_db": -math.inf, "noise[2].level_db": -math.inf, **edits}
 
 
-def x_exact(p, t):
-    """The plan's model (§2.3, §2.4) evaluated directly, with the noise summed exactly."""
-    t = np.asarray(t, dtype=float)
+def x_exact(p: Patch, times: ArrayLike) -> Floats:
+    """Evaluate the plan's model (§2.3, §2.4) directly, with the noise summed exactly."""
+    t = np.asarray(times, dtype=float)
     b = p.body
     eb = amplitude_curve([m / 1000 for m, _ in b.amp], [g for _, g in b.amp])
-    R = pitch_curve([m / 1000 for m, _ in b.pitch], [r for _, r in b.pitch]).integral(t)
+    turns = pitch_curve([m / 1000 for m, _ in b.pitch], [r for _, r in b.pitch]).integral(t)
     x = np.zeros_like(t)
     if b.level_db > -math.inf:
         for ratio, level in b.modes:
             e = compressed(eb, ratio**b.damping)
-            x += 10 ** (b.level_db / 20) * 10 ** (level / 20) * e(t) * np.sin(2 * np.pi * b.tune_hz * ratio * R)
+            x += 10 ** (b.level_db / 20) * 10 ** (level / 20) * e(t) * np.sin(2 * np.pi * b.tune_hz * ratio * turns)
     for layer in p.noise:
         if layer.level_db > -math.inf:
             e = amplitude_curve([m / 1000 for m, _ in layer.amp], [g for _, g in layer.amp])
-            q = 1 - layer.rattle * eb(t) * (1 - np.cos(2 * np.pi * b.tune_hz * R)) / 2
+            q = 1 - layer.rattle * eb(t) * (1 - np.cos(2 * np.pi * b.tune_hz * turns)) / 2
             x += 10 ** (layer.level_db / 20) * e(t) * q * noise.at(p.seed, *layer.band_hz, t)
     return x
 
 
-def x_internal(p, rate, n0, n1):
+def x_internal(p: Patch, rate: int, n0: int, n1: int) -> Floats:
+    """Return the saturator's input as the renderer computes it, over [n0, n1)."""
     v = voice.voice(p)
     return voice.sources(v, rate, n0, n1, voice.tables(v, rate))
 
@@ -61,6 +85,7 @@ def x_internal(p, rate, n0, n1):
 
 
 def test_drive_identities() -> None:
+    """Find 0 dB the identity, S(±1) = ±1 exactly, S odd and monotone, and the small-signal gain the drive."""
     assert voice.drive_alpha(0.0) == 0.0
     for db in (0.5, 6.0, 18.0, 48.0):
         a = voice.drive_alpha(db)
@@ -79,9 +104,10 @@ def test_drive_identities() -> None:
 
 
 def test_slope_and_curvature_are_the_derivatives() -> None:
+    """Find S′ and S″ as the saturator's numerical derivatives, and 1 and 0 without drive."""
+    x = np.linspace(-1.5, 1.5, 301)
     for db in (3.0, 24.0):
         a = voice.drive_alpha(db)
-        x = np.linspace(-1.5, 1.5, 301)
         h = 1e-6
         np.testing.assert_allclose(
             voice.slope(a, x),
@@ -116,17 +142,19 @@ def test_slope_and_curvature_are_the_derivatives() -> None:
         {"noise[1].level_db": -math.inf, "seed": 2**63 - 1},
     ],
 )
-def test_sources_are_the_model(edits) -> None:
+def test_sources_are_the_model(edits: dict[str, object]) -> None:
+    """Find the renderer's x at random samples equal to the plan's model, summed directly, for five patches."""
     p = make(**edits)
     rng = np.random.default_rng(1)
     n = np.unique(np.concatenate(([0, 1, 77], rng.integers(0, int(0.27 * RATE), 300))))
     v = voice.voice(p)
     tabs = voice.tables(v, RATE)
     got = np.concatenate([voice.sources(v, RATE, int(k), int(k) + 1, tabs) for k in n])
-    np.testing.assert_allclose(got, x_exact(p, n / RATE), rtol=0, atol=1e-12)
+    np.testing.assert_allclose(got, x_exact(p, n / RATE), rtol=0, atol=EXACT)
 
 
 def test_blocks_and_longer_renders_never_change_samples() -> None:
+    """Find a sample the same whatever block it is computed in and however long the render."""
     p = make(**{"noise[2].rattle": 0.7})
     v = voice.voice(p)
     tabs = voice.tables(v, RATE)
@@ -139,12 +167,14 @@ def test_blocks_and_longer_renders_never_change_samples() -> None:
 
 
 def test_every_hit_starts_at_exactly_zero() -> None:
+    """Find the first sample of every hit exactly 0."""
     for edits in ({}, {"drive.db": 30.0}, {"noise[1].amp": amp((0, 0), (0.02, 1), (5, 0))}):
         v = voice.voice(make(**edits))
         assert voice.sources(v, RATE, 0, 1, voice.tables(v, RATE))[0] == 0.0
 
 
 def test_identical_layers_sum_coherently() -> None:
+    """Find two identical layers twice one: the same noise, +6 dB."""
     # Two identical layers at equal level make +6 dB, not +3 dB: they are the same noise.
     p = make(**{"body.level_db": -math.inf})
     one = dataclasses.replace(p, noise=(p.noise[1],))
@@ -154,11 +184,12 @@ def test_identical_layers_sum_coherently() -> None:
 
 
 def test_editing_the_body_keeps_the_noise_and_changes_the_rattle() -> None:
+    """Retune the body: the layers' noise stays, and the rattle follows the new fundamental."""
     base = {"body.tune_hz": 185.0}
     moved = {"body.tune_hz": 230.0, "body.modes": modes((1, 0), (1.7, -3)), "body.damping": 2.0}
     silent_body = {"body.level_db": -math.inf}
 
-    def layers(edits):
+    def layers(edits: dict[str, object]) -> Floats:
         return x_internal(make(**edits, **silent_body), RATE, 0, 300000)
 
     assert np.array_equal(layers({**base, "noise[2].rattle": 0.0}), layers({**moved, "noise[2].rattle": 0.0}))
@@ -166,6 +197,7 @@ def test_editing_the_body_keeps_the_noise_and_changes_the_rattle() -> None:
 
 
 def test_a_silent_body_gates_the_rattle_like_a_sounding_one() -> None:
+    """Find the rattle gated by a silent body as by a sounding one."""
     loud, quiet = (
         make(**{"noise[1].level_db": -math.inf}),
         make(**{"noise[1].level_db": -math.inf, "body.level_db": -math.inf}),
@@ -180,9 +212,11 @@ def test_a_silent_body_gates_the_rattle_like_a_sounding_one() -> None:
 
 
 def test_source_length_and_sample_count() -> None:
+    """Find the source length the last audible knot, and N every sample at or before it."""
     v = voice.voice(make())
-    assert v.t_src == 0.26
-    assert voice.sample_count(0.26, RATE) == 399361
+    length_s, samples = 0.26, 399361  # the wires end at 260 ms
+    assert v.t_src == length_s
+    assert voice.sample_count(length_s, RATE) == samples
     for t, rate in ((0.26, 1411200), (1e-5, 1536000), (0.0, 1536000), (2.0, 3072000)):
         n = voice.sample_count(t, rate)
         assert (n - 1) / rate <= t < n / rate
@@ -191,19 +225,22 @@ def test_source_length_and_sample_count() -> None:
 # Tuning, modes and damping.
 
 
-def fit_frequencies(t, x, guesses):
-    """Least-squares multi-sine fit: the frequencies, with the amplitudes and phases solved linearly."""
+def fit_frequencies(t: Floats, x: Floats, guesses: list[float]) -> Floats:
+    """Fit a sum of sines by least squares: the frequencies, with the amplitudes and phases solved linearly."""
 
-    def residual(f):
+    def residual(f: Floats) -> Floats:
         basis = np.concatenate([np.stack([np.sin(2 * np.pi * fi * t), np.cos(2 * np.pi * fi * t)]) for fi in f]).T
         coef, *_ = np.linalg.lstsq(basis, x, rcond=None)
-        return basis @ coef - x
+        out: Floats = basis @ coef - x
+        return out
 
-    return least_squares(residual, guesses, x_scale=1e-3, xtol=1e-15, ftol=1e-15, gtol=1e-15).x
+    fit: Floats = least_squares(residual, guesses, x_scale=1e-3, xtol=1e-15, ftol=1e-15, gtol=1e-15).x
+    return fit
 
 
 @pytest.mark.parametrize("tune", [40.0, 185.0, 1000.0, 4000.0])
-def test_every_mode_sounds_at_its_ratio_of_the_tuning(tune) -> None:
+def test_every_mode_sounds_at_its_ratio_of_the_tuning(tune: float) -> None:
+    """Fit the settled body at 40 Hz to 4 kHz and find every mode within 0.001 cent of f₀·rᵢ."""
     ratios = (1.0, 1.593, 2.136, 2.295)
     p = make(
         **silent_layers(
@@ -222,11 +259,11 @@ def test_every_mode_sounds_at_its_ratio_of_the_tuning(tune) -> None:
     t = np.arange(n0, n1) / rate
     f = fit_frequencies(t, x, [tune * r * (1 + 1e-5) for r in ratios])
     cents = 1200 * np.log2(f / (tune * np.array(ratios)))
-    assert np.max(np.abs(cents)) <= 0.001
+    assert np.max(np.abs(cents)) <= CENTS
 
 
-def mode_amplitudes(t, x, freqs, centres, half):
-    """Each mode's amplitude at each centre, by a windowed least-squares fit with known frequencies."""
+def mode_amplitudes(t: Floats, x: Floats, freqs: tuple[float, ...], centres: Floats, half: float) -> Floats:
+    """Return each mode's amplitude at each centre, by a windowed least-squares fit with known frequencies."""
     out = []
     for c in centres:
         w = np.abs(t - c) <= half
@@ -241,11 +278,12 @@ def mode_amplitudes(t, x, freqs, centres, half):
 
 
 @pytest.mark.parametrize(("ratio", "beta"), [(1.593, 0.5), (1.593, 1.0), (2.136, 2.0), (2.295, 3.0), (4.0, 1.0)])
-def test_damping_scales_decay_rates_by_ratio_to_the_beta(ratio, beta) -> None:
+def test_damping_scales_decay_rates_by_ratio_to_the_beta(ratio: float, beta: float) -> None:
+    """Measure two modes' decay rates and find their ratio rᵢ^β."""
     # An exponential body shape, knots every 6 dB; flat pitch, so the phases are known exactly.
     s = ratio**beta
     spacing = 5.0 * s  # the faster mode still decays 6 dB per 5 ms
-    knots = [(0.0, 0.0)] + [(1.0 + spacing * k, 10 ** (-6 * k / 20)) for k in range(16)]
+    knots = [(0.0, 0.0), *((1.0 + spacing * k, 10 ** (-6 * k / 20)) for k in range(16))]
     knots.append((knots[-1][0] + spacing, 0.0))
     p = make(
         **silent_layers(
@@ -268,10 +306,11 @@ def test_damping_scales_decay_rates_by_ratio_to_the_beta(ratio, beta) -> None:
         centres = np.linspace(a, b, 41)
         amps = mode_amplitudes(t, x, (1000.0, 1000.0 * ratio), centres, half=1e-3)[:, i]
         rates.append(-np.polyfit(centres, np.log(amps), 1)[0])
-    assert rates[1] / rates[0] == pytest.approx(s, rel=1e-3)
+    assert rates[1] / rates[0] == pytest.approx(s, rel=DECAY)
 
 
 def test_modes_share_the_peak_and_the_fundamental_lasts_longest() -> None:
+    """Find every mode peaking with the body, the fundamental's envelope the body's shape itself."""
     v = voice.voice(make(**{"body.damping": 2.0}))
     tpk = v.body_amp.t[1]
     for m in v.modes:
@@ -284,7 +323,8 @@ def test_modes_share_the_peak_and_the_fundamental_lasts_longest() -> None:
 # Rattle.
 
 
-def rattle_patch(depth, **edits):
+def rattle_patch(depth: float, **edits: object) -> Patch:
+    """Return a patch of the wires alone, rattling at this depth under a long, flat, silent body."""
     return make(
         **{
             "noise[1].level_db": -math.inf,
@@ -300,42 +340,49 @@ def rattle_patch(depth, **edits):
 
 
 @pytest.mark.parametrize("depth", [0.25, 0.5, 1.0])
-def test_rattle_modulates_at_the_fundamental_with_its_depth(depth) -> None:
+def test_rattle_modulates_at_the_fundamental_with_its_depth(depth: float) -> None:
+    """Find the rattle the gate 1 − d(1 − cos φ₁)/2 exactly, at the fundamental's phase with the glide, of depth d."""
     p = rattle_patch(depth)
     v = voice.voice(p)
     tabs = voice.tables(v, RATE)
     n0, n1 = int(0.002 * RATE), int(0.38 * RATE)
     x = voice.sources(v, RATE, n0, n1, tabs)
-    n = tabs[1][np.arange(n0, n1) % RATE]
-    ok = np.abs(n) > 0.1
+    wires = tabs[1]
+    assert wires is not None
+    n = wires[np.arange(n0, n1) % RATE]
+    ok = np.abs(n) > AUDIBLE
     t = np.arange(n0, n1)[ok] / RATE
     q = x[ok] / (10 ** (p.noise[1].level_db / 20) * n[ok])
     phi = 2 * np.pi * p.body.tune_hz * pitch_curve([0.0, 0.015], [1.08, 1.0]).integral(t)
-    np.testing.assert_allclose(q, 1 - depth * (1 - np.cos(phi)) / 2, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(q, 1 - depth * (1 - np.cos(phi)) / 2, rtol=0, atol=EXACT)
     # Demodulated: a component at the fundamental's phase, glide included, of depth d.
     coef, *_ = np.linalg.lstsq(np.stack([np.ones_like(t), np.cos(phi), np.sin(phi)]).T, q, rcond=None)
-    assert 2 * coef[1] == pytest.approx(depth, rel=0.01)
-    assert abs(coef[2]) <= 1e-9
+    assert 2 * coef[1] == pytest.approx(depth, rel=DEPTH)
+    assert abs(coef[2]) <= SIDE
 
 
 def test_no_rattle_without_depth_or_body_shape() -> None:
+    """Find no rattle at depth 0, nor where the body's shape is 0."""
     for p in (rattle_patch(0.0), rattle_patch(0.8, **{"body.amp": amp((500, 0), (501, 1), (560, 0))})):
         v = voice.voice(p)
         tabs = voice.tables(v, RATE)
         n0, n1 = int(0.002 * RATE), int(0.45 * RATE)
         x = voice.sources(v, RATE, n0, n1, tabs)
+        wires = tabs[1]
+        assert wires is not None
         np.testing.assert_array_equal(
             x,
             10 ** (p.noise[1].level_db / 20)
             * v.layers[1].amp.on(np.arange(n0, n1) / RATE)
-            * tabs[1][np.arange(n0, n1) % RATE],
+            * wires[np.arange(n0, n1) % RATE],
         )
 
 
 # The knee slew at every drive.
 
 
-def brute_knee(x, alpha):
+def brute_knee(x: Floats, alpha: float) -> float:
+    """Return the knee slew at α by brute force: the largest step of αx that crosses zero or touches |αx| ≤ 1."""
     u = np.concatenate(([0.0], x))
     a, b = u[:-1], u[1:]
     step = np.abs(b - a)
@@ -344,13 +391,14 @@ def brute_knee(x, alpha):
 
 
 @pytest.mark.parametrize("edits", [{}, {"noise[1].level_db": 12.0, "drive.db": 20.0}, {"body.level_db": 10.0}])
-def test_knee_record_is_exact_at_every_drive(edits) -> None:
+def test_knee_record_is_exact_at_every_drive(edits: dict[str, object]) -> None:
+    """Find the recorded knee slew the brute force's at every drive and drop, and the crest and steepest crossing."""
     v = voice.voice(make(**edits))
     count = voice.sample_count(v.t_src, RATE)
     tabs = voice.tables(v, RATE)
     _, slew = voice.internal(v, RATE, count, tabs)
     x = np.concatenate(
-        [voice.sources(v, RATE, a, min(a + voice.BLOCK, count), tabs) for a in range(0, count, voice.BLOCK)]
+        [voice.sources(v, RATE, a, min(a + voice.BLOCK, count), tabs) for a in range(0, count, voice.BLOCK)],
     )
     alphas = np.concatenate(
         [
@@ -369,6 +417,7 @@ def test_knee_record_is_exact_at_every_drive(edits) -> None:
 
 
 def test_knees_never_count_a_step_again_once_it_stops() -> None:
+    """Find a step counted only while α·reach ≤ 1, and q linear in α otherwise."""
     k = voice.Knees(0.1, np.array([0.2, 0.5]), np.array([0.3, 0.4]))
     assert k.at(1.0) == pytest.approx(0.4)  # both steps reach below 1
     assert k.at(1 / 0.5) == pytest.approx(2 * 0.4)
@@ -381,12 +430,12 @@ def test_knees_never_count_a_step_again_once_it_stops() -> None:
 # The kink bound: every jump against one-sided derivatives of the model.
 
 
-def one_sided(f, tau, delta, side):
-    """(f″, f‴) at tau from one side, by a least-squares polynomial on [tau, tau ± delta]."""
+def one_sided(f: Callable[[Floats], Floats], tau: float, delta: float, side: int) -> tuple[float, float]:
+    """Return (f″, f‴) at tau from one side, by a least-squares polynomial on [tau, tau ± delta]."""
     u = np.linspace(0, 1, 24)[1:] * side
     coef = np.polyfit(u, f(tau + u * delta), 8)
     p = np.poly1d(coef)
-    return p.deriv(2)(0.0) / delta**2, p.deriv(3)(0.0) / delta**3
+    return float(p.deriv(2)(0.0)) / delta**2, float(p.deriv(3)(0.0)) / delta**3
 
 
 KINKY = {
@@ -401,6 +450,7 @@ KINKY = {
 
 
 def test_every_jump_matches_the_model() -> None:
+    """Find each knot's jumps in x″ and x‴ as one-sided derivatives of the model measure them."""
     p = make(**KINKY)
     v = voice.voice(p)
     k = voice.kink_terms(v, RATE)
@@ -409,19 +459,20 @@ def test_every_jump_matches_the_model() -> None:
         rows = k.t == tau
         others = times[times != tau]
         delta = min(2e-6, 0.25 * float(np.min(np.abs(others - tau))))
-        f = lambda t: x_exact(p, t)  # noqa: E731
+        f = functools.partial(x_exact, p)
         b2, b3 = one_sided(f, tau, delta, -1) if tau > 0 else (0.0, 0.0)
         a2, a3 = one_sided(f, tau, delta, +1)
         want2, want3 = a2 - b2, a3 - b3
         got2, got3 = float(np.sum(k.d2[rows])), float(np.sum(k.d3[rows]))
         scale2 = max(abs(a2), abs(b2), 1.0)
         scale3 = max(abs(a3), abs(b3), 1e5)
-        assert got2 == pytest.approx(want2, abs=2e-3 * scale2), (tau, [k.paths[i] for i in np.flatnonzero(rows)])
-        assert got3 == pytest.approx(want3, abs=2e-3 * scale3), (tau, [k.paths[i] for i in np.flatnonzero(rows)])
-        np.testing.assert_allclose(k.x[rows], x_exact(p, np.full(rows.sum(), tau)), rtol=0, atol=1e-5)
+        assert got2 == pytest.approx(want2, abs=JUMP * scale2), (tau, [k.paths[i] for i in np.flatnonzero(rows)])
+        assert got3 == pytest.approx(want3, abs=JUMP * scale3), (tau, [k.paths[i] for i in np.flatnonzero(rows)])
+        np.testing.assert_allclose(k.x[rows], x_exact(p, np.full(rows.sum(), tau)), rtol=0, atol=AT_KNOTS)
 
 
 def test_jumps_through_the_saturator() -> None:
+    """Find the jumps through the saturator as one-sided derivatives of S(x) measure them."""
     # Deep in saturation y hardly moves, so the numerical derivatives meet rounding: 10⁻¹⁶ amplified by
     # the polynomial fit, over δ² and δ³. The jumps that matter are far above that floor.
     p = make(**KINKY, **{"drive.db": 18.0})
@@ -432,46 +483,52 @@ def test_jumps_through_the_saturator() -> None:
     for tau in times[1:]:
         rows = k.t == tau
         delta = min(1e-6, 0.25 * float(np.min(np.abs(times[times != tau] - tau))))
-        f = lambda t: voice.saturate(a, x_exact(p, t))  # noqa: E731
+
+        def f(t: Floats) -> Floats:
+            return voice.saturate(a, x_exact(p, t))
+
         b2, b3 = one_sided(f, tau, delta, -1)
         a2, a3 = one_sided(f, tau, delta, +1)
         g1, g2 = voice.slope(a, k.x[rows]), voice.curvature(a, k.x[rows])
         got2 = float(np.sum(g1 * k.d2[rows]))
         got3 = float(np.sum(g1 * k.d3[rows] + 3 * g2 * k.dx[rows] * k.d2[rows]))
-        assert got2 == pytest.approx(a2 - b2, abs=5e-3 * max(abs(a2), abs(b2)) + 1e-10 / delta**2)
-        assert got3 == pytest.approx(a3 - b3, abs=5e-3 * max(abs(a3), abs(b3)) + 1e-10 / delta**3)
+        assert got2 == pytest.approx(a2 - b2, abs=DRIVEN_JUMP * max(abs(a2), abs(b2)) + 1e-10 / delta**2)
+        assert got3 == pytest.approx(a3 - b3, abs=DRIVEN_JUMP * max(abs(a3), abs(b3)) + 1e-10 / delta**3)
 
 
 def test_kink_bound_form() -> None:
+    """Find the kink bound's form: its sum over knots, at many drives at once, its weights and its paths."""
     p = make(**KINKY, **{"drive.db": 12.0})
     v = voice.voice(p)
     k = voice.kink_terms(v, RATE)
-    total = voice.kink_bound(k, v.alpha, RATE, 24000.0)
+    total = voice.kink_bound(k, v.alpha, RATE, BAND)
     assert total > 0
-    assert sum(c for _, c in voice.kink_knots(k, v.alpha, RATE, 24000.0)) == pytest.approx(total, rel=1e-12)
+    assert sum(c for _, c in voice.kink_knots(k, v.alpha, RATE, BAND)) == pytest.approx(total, rel=1e-12)
     alphas = np.array([0.0, 0.5, v.alpha, 30.0])
     np.testing.assert_allclose(
-        voice.kink_bounds(k, alphas, RATE, 24000.0),
-        [voice.kink_bound(k, a, RATE, 24000.0) for a in alphas],
+        voice.kink_bounds(k, alphas, RATE, BAND),
+        [voice.kink_bound(k, a, RATE, BAND) for a in alphas],
         rtol=1e-12,
     )
     # The weights: 4 ζ(n+1) · band / (2πF)^(n+1), with the 1% interpolation margin.
-    w2, w3 = voice._weights(RATE, 24000.0)
-    assert w2 == pytest.approx(1.01 * 4 * 1.2020569031595942 * 24000 / (2 * np.pi * RATE) ** 3, rel=1e-15)
-    assert w3 == pytest.approx(1.01 * 4 * np.pi**4 / 90 * 24000 / (2 * np.pi * RATE) ** 4, rel=1e-15)
+    w2, w3 = voice.weights(RATE, BAND)
+    assert w2 == pytest.approx(1.01 * 4 * ZETA3 * BAND / (2 * np.pi * RATE) ** 3, rel=1e-15)
+    assert w3 == pytest.approx(1.01 * 4 * np.pi**4 / 90 * BAND / (2 * np.pi * RATE) ** 4, rel=1e-15)
     # Paths name knots as the parser does, counting from 1.
-    paths = {path for path, _ in voice.kink_knots(k, v.alpha, RATE, 24000.0)}
+    paths = {path for path, _ in voice.kink_knots(k, v.alpha, RATE, BAND)}
     assert {"body.amp[1]", "body.amp[5]", "body.pitch[2]", "noise[1].amp[5]", "noise[2].amp[4]"} <= paths
 
 
 def test_silence_has_no_kinks() -> None:
+    """Find no kink and a bound of 0 for silence."""
     p = make(**{"body.level_db": -math.inf, "noise[1].level_db": -math.inf, "noise[2].level_db": -math.inf})
     k = voice.kink_terms(voice.voice(p), RATE)
     assert k.t.size == 0
-    assert voice.kink_bound(k, 0.0, RATE, 24000.0) == 0.0
+    assert voice.kink_bound(k, 0.0, RATE, BAND) == 0.0
 
 
 def test_example_patch_kinks_are_dominated_by_the_stick() -> None:
+    """Find the example's kink bound led by the stick's knots."""
     v = voice.voice(loads(EXAMPLE))
-    top = voice.kink_knots(voice.kink_terms(v, RATE), v.alpha, RATE, 24000.0)[0][0]
+    top = voice.kink_knots(voice.kink_terms(v, RATE), v.alpha, RATE, BAND)[0][0]
     assert top.startswith("noise[1].amp")

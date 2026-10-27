@@ -525,7 +525,7 @@ def _layer_rows(v: Voice, rate: int, tabs: Tables) -> list[Row]:
     return rows
 
 
-def _weights(rate: int, band: float) -> tuple[float, float]:
+def weights(rate: int, band: float) -> tuple[float, float]:
     """Return the weights of the jumps in x″ and x‴ in the kink bound."""
     return (
         INTERPOLATION_MARGIN * 4 * ZETA3 * band / (TWO_PI * rate) ** 3,
@@ -542,7 +542,7 @@ def kink_contributions(k: Kinks, alpha: float, rate: int, band: float) -> Floats
     4 ζ(n+1) · band · |J| / (2πF)^(n+1). Through the saturator y″ jumps by
     S′·Δx″ and y‴ by S′·Δx‴ + 3·S″·x′·Δx″.
     """
-    w2, w3 = _weights(rate, band)
+    w2, w3 = weights(rate, band)
     g1, g2 = slope(alpha, k.x), curvature(alpha, k.x)
     out: Floats = w2 * np.abs(g1 * k.d2) + w3 * np.abs(g1 * k.d3 + 3 * g2 * k.dx * k.d2)
     return out
@@ -555,7 +555,7 @@ def kink_bound(k: Kinks, alpha: float, rate: int, band: float) -> float:
 
 def kink_bounds(k: Kinks, alphas: ArrayLike, rate: int, band: float) -> Floats:
     """Return the kink bound at many drives at once."""
-    w2, w3 = _weights(rate, band)
+    w2, w3 = weights(rate, band)
     a = np.asarray(alphas, dtype=float)[:, None]
     driven = a > 0
     th = np.tanh(a * k.x)
