@@ -98,7 +98,7 @@ class Decimator:
 
 
 def manifest() -> dict:
-    return json.loads(resources.files("snare").joinpath("data", "decimators.json").read_text())
+    return json.loads(resources.files("halyard_synth").joinpath("data", "decimators.json").read_text())
 
 
 def load_taps(raw: bytes, entry: dict) -> np.ndarray:
@@ -112,9 +112,9 @@ def load_taps(raw: bytes, entry: dict) -> np.ndarray:
 
 @functools.cache
 def decimator(base: int, k: int = K) -> Decimator:
-    """A frozen decimator from snare/data, verified against its checksum."""
+    """A frozen decimator from halyard_synth/data, verified against its checksum."""
     entry = manifest()["filters"][f"{base}x{k}"]
-    raw = resources.files("snare").joinpath("data", entry["file"]).read_bytes()
+    raw = resources.files("halyard_synth").joinpath("data", entry["file"]).read_bytes()
     return Decimator(base, k, load_taps(raw, entry), entry["sha256"], entry["stopband_db"])
 
 
@@ -492,7 +492,7 @@ class Take:
             )
         return (
             f"OUTSIDE the validated domain by {-d.margin_db:.1f} dB (predicted aliasing {d.predicted_db:.0f} dB); "
-            "check it with `snare verify`"
+            "check it with `halyard verify`"
         )
 
     def _detail(self, drive_db: float) -> str | None:
@@ -752,7 +752,7 @@ def provenance(
 ) -> dict:
     rate, factor = rates(p.output.sample_rate, k)
     meta = {
-        "renderer": f"snare {__version__}",
+        "renderer": f"halyard {__version__}",
         "seed": seed,
         "take": take,
         "takes": takes,
@@ -792,7 +792,7 @@ def write_take(
 ) -> None:
     """Write one take's WAV in the patch's format, with its root note, its own patch text and provenance.
 
-    The patch text is the take's: the patch with the take's seed, so `snare
+    The patch text is the take's: the patch with the take's seed, so `halyard
     extract` recovers exactly the patch that renders this file.
     """
     bits = FORMATS[p.output.format]

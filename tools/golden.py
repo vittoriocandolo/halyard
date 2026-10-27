@@ -11,9 +11,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from snare.cli import REFERENCES, reference_text
-from snare.patch import loads
-from snare.render import export, render_takes
+from halyard_synth.cli import REFERENCES, reference_text
+from halyard_synth.patch import loads
+from halyard_synth.render import export, render_takes
 
 GOLDEN = Path(__file__).resolve().parent.parent / "tests" / "golden"
 TAKES = 2  # two takes each, so the seeds of a set are pinned too

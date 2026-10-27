@@ -5,9 +5,9 @@ import pytest
 import soundfile
 from conftest import EXAMPLE
 
-from snare import cli, wav
-from snare.patch import dumps, loads
-from snare.render import render, render_takes
+from halyard_synth import cli, wav
+from halyard_synth.patch import dumps, loads
+from halyard_synth.render import render, render_takes
 
 
 def run(capsys, *args):

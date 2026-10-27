@@ -9,9 +9,9 @@ import soundfile
 from conftest import EXAMPLE, make
 from scipy.io import wavfile
 
-from snare import __version__, cli, noise, wav
-from snare import render as R
-from snare.patch import dumps, loads
+from halyard_synth import __version__, cli, noise, wav
+from halyard_synth import render as R
+from halyard_synth.patch import dumps, loads
 
 
 def walk(path):
@@ -109,7 +109,7 @@ def test_provenance(exported):
     meta = wav.read(path).meta
     assert meta["patch"] == dumps(loads(EXAMPLE))
     assert loads(meta["patch"]) == loads(EXAMPLE)
-    assert meta["renderer"] == f"snare {__version__}"
+    assert meta["renderer"] == f"halyard {__version__}"
     assert (meta["seed"], meta["take"], meta["takes"]) == (1, 1, 1)
     assert meta["set_gain_db"] == pytest.approx(-6.0) and meta["take_gain_db"] == 0.0
     assert meta["decimator"]["sha256"] == R.decimator(48000).sha256

@@ -7,19 +7,19 @@ read what a render reports. The design and its evidence are in
 
 ## The workflow
 
-1. **Start from the nearest reference.** `snare init crack --tune D3 > snare.toml`.
+1. **Start from the nearest reference.** `halyard init crack --tune D3 > snare.toml`.
    The references are `tone`, `crack`, `fat`, `driven`, `clap` and `snap`
    (below). `--tune` takes a note name or a frequency; the patch stays in Hz.
-2. **Voice it in context.** `snare audition snare.toml --watch --bpm 92 --with groove.wav`
+2. **Voice it in context.** `halyard audition snare.toml --watch --bpm 92 --with groove.wav`
    plays the snare on beats 2 and 4 over your loop and re-renders every time
    you save the file. Edits take over at the next hit.
-3. **Match it against the sample it should replace.** `snare audition snare.toml --watch --against favourite.wav --blind`
+3. **Match it against the sample it should replace.** `halyard audition snare.toml --watch --against favourite.wav --blind`
    alternates your render with the sample, matched in loudness, in a random
    order that audition reveals when you stop it.
-4. **Derive softer layers.** `snare softer snare.toml 8 > snare-8.toml`, and so on.
-5. **Pack them with takes for the sampler.** `snare pack snare.toml snare-8.toml snare-16.toml snare-24.toml --takes 6 --out kit/`.
+4. **Derive softer layers.** `halyard softer snare.toml 8 > snare-8.toml`, and so on.
+5. **Pack them with takes for the sampler.** `halyard pack snare.toml snare-8.toml snare-16.toml snare-24.toml --takes 6 --out kit/`.
 
-Every file is exact and reproducible: `snare extract` gives back the exact
+Every file is exact and reproducible: `halyard extract` gives back the exact
 patch of any exported file, take included.
 
 ## The references
@@ -71,7 +71,7 @@ pitch is extreme only at its knots.
 | `amp` | 3 – 32 knots | The body shape. Its first knot at gain 1 is the peak, where damping starts. |
 
 Every body frequency, f₀ · ratio · glide, must stay within 10 Hz – 20 kHz at
-every pitch knot. `snare tune` refuses a tuning that would take a mode out of
+every pitch knot. `halyard tune` refuses a tuning that would take a mode out of
 that range; it never clamps.
 
 ### Noise layers
@@ -119,7 +119,7 @@ mode lowers its target by those 2 LSB.
 
 `seed` picks the noise. The noise is the instrument, so each seed is a
 **take** of the same sound, slightly different, as real hits are.
-`snare render … --takes 8` writes seeds seed, seed + 1, … as
+`halyard render … --takes 8` writes seeds seed, seed + 1, … as
 `snare_rr1.wav` … `snare_rr8.wav`. The takes of a set share one gain: in peak
 mode, the gain that brings the loudest take to the target. The others keep
 their natural levels, because takes differ more in peak (1.5–7 dB) than in
@@ -133,13 +133,13 @@ Each prints a complete patch; redirect it to a file. They rewrite points and
 never add parameters, so you can always keep editing the result by hand. They
 fail, and say why, rather than clamp.
 
-- **`snare tune PATCH NOTE`** sets `tune_hz` from D3, F#3, Eb4 or a frequency
+- **`halyard tune PATCH NOTE`** sets `tune_hz` from D3, F#3, Eb4 or a frequency
   in Hz. Modes, glide and rattle follow, being ratios.
-- **`snare stretch PATCH CURVE... FACTOR [--after MS]`** rescales knot times
+- **`halyard stretch PATCH CURVE... FACTOR [--after MS]`** rescales knot times
   after each shape's peak (0 ms for pitch), or after `--after`. `all` names
-  every amplitude shape, so `snare stretch snare.toml all 0.8` shortens a whole
+  every amplitude shape, so `halyard stretch snare.toml all 0.8` shortens a whole
   sound; `--after 0` also scales the rises, which tightens a clap.
-- **`snare bursts PATCH LAYER --count N --spacing MS …`** rewrites a layer's
+- **`halyard bursts PATCH LAYER --count N --spacing MS …`** rewrites a layer's
   shape as a clap train: N bursts (1–10), each rising in `--rise` ms (default
   0.1) to its peak, a shoulder 0.1 ms after, and down to `--dip` (default 0.1,
   over the lower of the two peaks) before the next. Each gap is `--growth`
@@ -147,7 +147,7 @@ fail, and say why, rather than clamp.
   last burst decays over `--tail` ms (default 80) with a knot 20 dB down a
   third of the way. `--start MS` delays the first burst, so two layers with
   different bands and starts make a stacked clap.
-- **`snare softer PATCH DB [--glide P] [--contact P]`** gives the same drum
+- **`halyard softer PATCH DB [--glide P] [--contact P]`** gives the same drum
   struck DB softer, by three rules from the physics of a struck head:
   - every source level falls by DB, before the drive, so a softer hit is also
     cleaner;
@@ -168,17 +168,17 @@ command; the test suite checks that each moves the sound the right way.
 
 | To | Edit |
 |---|---|
-| Change the tuning | `snare tune snare.toml F3`, or edit `body.tune_hz` |
-| Shorten the tail | `snare stretch snare.toml all 0.7` |
+| Change the tuning | `halyard tune snare.toml F3`, or edit `body.tune_hz` |
+| Shorten the tail | `halyard stretch snare.toml all 0.7` |
 | Add crack | raise the stick layer's `level_db` (the short, wide layer) by 4–6 dB, or shorten its rise |
 | Add body | raise `body.level_db` |
 | Add wires | raise the wires layer's `level_db` and its `rattle` |
 | Darken | lower each layer's upper band edge (`band_hz[2]`) |
 | Add aggression | raise `drive.db` by 6 and lower `output.db` to taste. In a driven sound, the edge lives in the saturated source: raising the stick adds less than in a clean one. |
-| Make a ghost note | `snare softer snare.toml 18` |
-| Tighten a clap | `snare stretch clap.toml all 0.7 --after 0`, or re-run `bursts` with a shorter `--spacing` |
+| Make a ghost note | `halyard softer snare.toml 18` |
+| Tighten a clap | `halyard stretch clap.toml all 0.7 --after 0`, or re-run `bursts` with a shorter `--spacing` |
 | Darken a clap | lower both edges of each layer's band |
-| Shorten or brighten a snap | `snare stretch snap.toml all 0.6`; raise the burst's band and level |
+| Shorten or brighten a snap | `halyard stretch snap.toml all 0.6`; raise the burst's band and level |
 | Move a snap's ping | edit `body.tune_hz` |
 
 **Pitched buzz.** Rattle reads the body's shape and phase, not its level, so a
@@ -209,7 +209,7 @@ render   99 ms
 - **domain** is the renderer's own prediction of its aliasing error, relative
   to the peak. Inside means at most −100 dB: the grid has demonstrated that
   every render inside measures below −100 dB (VALIDATION.md). Outside, the
-  render is still defined and exact, but unvalidated; `snare verify` measures
+  render is still defined and exact, but unvalidated; `halyard verify` measures
   its actual error against a reference render.
 - **The line under it** says what dominates the prediction:
   - *mostly kinks, 64% at noise[1].amp[2] (0.05 ms)*: a fast segment around
@@ -229,7 +229,7 @@ render   99 ms
 
 ## Audition
 
-`snare audition PATCH... [--watch] [--bpm BPM] [--beats 2,4] [--with BED] [--against SAMPLE] [--blind] [--takes N]`
+`halyard audition PATCH... [--watch] [--bpm BPM] [--beats 2,4] [--with BED] [--against SAMPLE] [--blind] [--takes N]`
 
 - It plays exactly the buffer `render` writes; PCM formats add only their
   quantization. It opens the device at the patch's sample rate and never
@@ -254,7 +254,7 @@ render   99 ms
 
 ## Packs
 
-`snare pack PATCH... --out DIR [--takes N] [--key K] [--level-match]` renders
+`halyard pack PATCH... --out DIR [--takes N] [--key K] [--level-match]` renders
 a multisample: each patch is one velocity layer, loudest first, and each gets
 N takes (take j of a layer plays its seed + j − 1).
 

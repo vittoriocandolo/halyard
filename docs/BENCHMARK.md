@@ -17,16 +17,16 @@ Not yet run.
    (gated reverb, multi-stage distortion with EQ between stages, layered
    samples) are out of family. List them anyway, marked out of family.
 2. **Fix the time limit before starting.** 15 minutes per sample is a
-   reasonable choice. Start each from the nearest reference (`snare init`),
+   reasonable choice. Start each from the nearest reference (`halyard init`),
    and edit with audition watching:
-   `snare audition snare.toml --watch --bpm 92 --with groove.wav --against sample.wav`.
+   `halyard audition snare.toml --watch --bpm 92 --with groove.wav --against sample.wav`.
 3. **Compare blind and level-matched, in context,** with the kick and the
    groove, over several takes:
-   `snare audition snare.toml --watch --bpm 92 --with groove.wav --against sample.wav --blind --takes 6`.
+   `halyard audition snare.toml --watch --bpm 92 --with groove.wav --against sample.wav --blind --takes 6`.
    Audition matches the sample to the render's largest 400 ms momentary
    loudness (BS.1770) and prints each pair's order when stopped. Record the
    matching method if you use another. Where the source has velocity layers,
-   derive yours with `snare softer`, pack them, and compare packs in a groove
+   derive yours with `halyard softer`, pack them, and compare packs in a groove
    with dynamics in your sampler.
 4. **Judge and sort.** A pass means you would use the render in place of the
    sample. Sort each failure as a missing control, a voicing-skill issue, or

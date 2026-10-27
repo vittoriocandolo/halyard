@@ -121,7 +121,7 @@ class Pack:
     def sfz(self) -> str:
         lines = [
             f"// {self.stem}: {len(self.layers)} velocity layer{'s' if len(self.layers) > 1 else ''} × {self.takes} "
-            f"take{'s' if self.takes > 1 else ''}, written by snare {__version__}",
+            f"take{'s' if self.takes > 1 else ''}, written by halyard {__version__}",
             "// Velocity follows a square law, 40·log10(v/127) dB, across layer boundaries.",
             "",
             "<global>",
@@ -160,7 +160,7 @@ class Pack:
             status = (
                 f"inside, worst margin {worst:.1f} dB"
                 if inside
-                else f"{sum(not d.inside for d in layer.domains)} take(s) OUTSIDE the validated domain; check with `snare verify`"
+                else f"{sum(not d.inside for d in layer.domains)} take(s) OUTSIDE the validated domain; check with `halyard verify`"
             )
             spread = f", take spread {layer.spread:.2f} dB" + (
                 " (over 1 dB: consider --level-match)" if layer.spread > 1.0 and not self.level_match else ""
@@ -306,7 +306,7 @@ def write(pk: Pack, out_dir) -> list[Path]:
 
 
 def pack(paths, out_dir, *, takes: int = 1, key: int | None = None, level_match: bool = False, out=None) -> int:
-    """`snare pack`: render the layers and takes, and write the files and the SFZ mapping."""
+    """`halyard pack`: render the layers and takes, and write the files and the SFZ mapping."""
     out = out or sys.stdout
     patches = []
     for path in paths:

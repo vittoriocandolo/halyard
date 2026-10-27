@@ -10,10 +10,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from snare import wav
-from snare.cli import REFERENCES, reference_text
-from snare.patch import loads
-from snare.render import render_takes
+from halyard_synth import wav
+from halyard_synth.cli import REFERENCES, reference_text
+from halyard_synth.patch import loads
+from halyard_synth.render import render_takes
 
 GOLDEN = Path(__file__).parent / "golden"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))

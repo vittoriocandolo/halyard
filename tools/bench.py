@@ -1,6 +1,6 @@
 """Performance check (plan §3, §8.1): render time and memory on this machine.
 
-Each case runs in a fresh interpreter after numpy, scipy and snare are
+Each case runs in a fresh interpreter after numpy, scipy and halyard_synth are
 imported, so memory is measured above that baseline. A render with a new
 seed computes its noise tables, as every take does; a repeated render finds
 them cached, as audition's re-renders do. Both are reported, and the budget
@@ -18,9 +18,9 @@ import sys
 
 HIT = r"""
 import dataclasses, json, resource, time
-from snare import cli
-from snare.patch import loads, stretch
-from snare.render import decimator, render
+from halyard_synth import cli
+from halyard_synth.patch import loads, stretch
+from halyard_synth.render import decimator, render
 p = loads(cli.reference_text("fat").replace("sample_rate = 48000", "sample_rate = %(rate)d"))
 p = stretch(p, "all", %(ms)f / p.length_ms, after_ms=0.0) if %(ms)f else p
 if %(long)d:
@@ -42,10 +42,10 @@ print(json.dumps({"fresh": fresh, "cached": cached, "mib": (peak - base) / 1024,
 
 PACK = r"""
 import json, resource, time
-from snare import cli
-from snare.patch import loads, softer
-from snare.pack import build
-from snare.render import decimator
+from halyard_synth import cli
+from halyard_synth.patch import loads, softer
+from halyard_synth.pack import build
+from halyard_synth.render import decimator
 p = loads(cli.reference_text("crack"))
 decimator(48000)
 base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss

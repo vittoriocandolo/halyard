@@ -13,9 +13,9 @@ import numpy as np
 import pytest
 from conftest import edit as set_path
 
-from snare import patch as P
-from snare.cli import reference_text
-from snare.render import render
+from halyard_synth import patch as P
+from halyard_synth.cli import reference_text
+from halyard_synth.render import render
 
 RATE = 48000
 SNARES = ("tone", "crack", "fat", "driven")
@@ -95,7 +95,7 @@ def crest_db(x, length_ms=60.0):
 
 
 def loudness(x):
-    from snare.loudness import momentary_max
+    from halyard_synth.loudness import momentary_max
 
     return momentary_max(x, RATE)
 

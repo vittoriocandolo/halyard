@@ -32,8 +32,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import grid  # noqa: E402
 
-from snare.patch import from_dict  # noqa: E402
-from snare.render import DRIVE_MAX, HEADROOM_STEP_DB, _drives, domain, render, synthesize  # noqa: E402
+from halyard_synth.patch import from_dict  # noqa: E402
+from halyard_synth.render import DRIVE_MAX, HEADROOM_STEP_DB, _drives, domain, render, synthesize  # noqa: E402
 
 FIELDS = ["family", "name", "drive", "inside", "estimate", "reference", "error", "dense", "renders", "seconds", "edits"]
 BISECT = 16  # halvings of a candidate bracket: 0.5 dB / 2¹⁶ ≈ 10⁻⁵ dB

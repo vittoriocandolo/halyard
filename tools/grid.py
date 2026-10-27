@@ -31,10 +31,10 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from snare import cli  # noqa: E402
-from snare import patch as P  # noqa: E402
-from snare.reference import compare, reference  # noqa: E402
-from snare.render import LIMIT, QUIET, SATURATION, synthesize  # noqa: E402
+from halyard_synth import cli  # noqa: E402
+from halyard_synth import patch as P  # noqa: E402
+from halyard_synth.reference import compare, reference  # noqa: E402
+from halyard_synth.render import LIMIT, QUIET, SATURATION, synthesize  # noqa: E402
 
 INF = math.inf
 FLOOR = 1e-7

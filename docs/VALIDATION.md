@@ -57,7 +57,7 @@ is bit-identical to one `upfirdn` call.
 
 ## Reference method (§8.2)
 
-`snare/reference.py` renders the take at an absolute reference rate, 128 ×
+`src/halyard_synth/reference.py` renders the take at an absolute reference rate, 128 ×
 base (6.144 MHz for the 48 kHz family), with noise from exact FFT tables at
 that rate. It applies a zero-phase mask flat to 0.4F and a raised cosine to
 zero at 0.5F, keeps every (128/K)-th sample, and runs the result through the

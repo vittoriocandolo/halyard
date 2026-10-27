@@ -5,7 +5,7 @@ import pytest
 from scipy.integrate import quad
 from scipy.interpolate import CubicHermiteSpline, PchipInterpolator
 
-from snare.curve import Curve, amplitude_curve, compressed, pchip_slopes, peak_index, pitch_curve
+from halyard_synth.curve import Curve, amplitude_curve, compressed, pchip_slopes, peak_index, pitch_curve
 
 
 def random_knots(rng):

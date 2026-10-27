@@ -7,10 +7,10 @@ import numpy as np
 import pytest
 from conftest import EXAMPLE
 
-from snare import audition as A
-from snare.loudness import momentary_max
-from snare.patch import loads
-from snare.render import quantize, render, render_takes
+from halyard_synth import audition as A
+from halyard_synth.loudness import momentary_max
+from halyard_synth.patch import loads
+from halyard_synth.render import quantize, render, render_takes
 
 RATE = 1000  # a toy rate keeps the hit arithmetic readable
 

@@ -536,7 +536,7 @@ def _array(name, items, note) -> list[str]:
     return [_note(f"{name} = [", note), *body, "]"]
 
 
-# Tuning vocabulary shared by `snare init`, `snare tune`, the report and the WAV root note.
+# Tuning vocabulary shared by `halyard init`, `halyard tune`, the report and the WAV root note.
 
 _NOTES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 _LETTERS = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}

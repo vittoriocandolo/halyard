@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 grid = pytest.importorskip("grid")
 
-from snare.render import K, QUIET, SATURATION  # noqa: E402
+from halyard_synth.render import K, QUIET, SATURATION  # noqa: E402
 
 
 @pytest.fixture(scope="module")

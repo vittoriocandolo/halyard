@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 from conftest import EXAMPLE, make
 
-from snare import reference as REF
-from snare.patch import loads
-from snare.render import synthesize
+from halyard_synth import reference as REF
+from halyard_synth.patch import loads
+from halyard_synth.render import synthesize
 
 
 def amp(*pts):

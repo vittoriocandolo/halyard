@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from snare import noise
+from halyard_synth import noise
 
 WIDEST = (20.0, 20000.0)
 WIRES = (2500.0, 9000.0)

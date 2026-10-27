@@ -5,9 +5,9 @@ import numpy as np
 import pytest
 from conftest import EXAMPLE, make
 
-from snare import patch as P
-from snare.curve import amplitude_curve, pitch_curve
-from snare.patch import PatchError, dumps, from_dict, loads
+from halyard_synth import patch as P
+from halyard_synth.curve import amplitude_curve, pitch_curve
+from halyard_synth.patch import PatchError, dumps, from_dict, loads
 
 
 def problems(fn, *args, **kwargs):
@@ -656,7 +656,7 @@ def test_softer_fails_rather_than_clamping():
 def test_softer_ladders_on_every_reference(name):
     # Plan §8.1: levels fall by exactly DB, the glide's excess scales by v², rises by v^(−1/5) and upper
     # band edges by v^(1/5), up to the decimals softer writes; and the ladder composes.
-    from snare import cli
+    from halyard_synth import cli
 
     p = loads(cli.reference_text(name))
     for db in (0, 6, 12, 18, 24, 30, 36):

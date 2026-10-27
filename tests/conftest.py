@@ -94,7 +94,7 @@ def edit(d: dict, path: str, value) -> dict:
 
 def make(**edits):
     """The example patch with edits by path, e.g. make(**{"noise[2].rattle": 0.3})."""
-    from snare.patch import from_dict
+    from halyard_synth.patch import from_dict
 
     d = tomllib.loads(EXAMPLE)
     for path, value in edits.items():

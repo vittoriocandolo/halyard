@@ -21,10 +21,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from snare.cli import REFERENCES, reference_text  # noqa: E402
-from snare.loudness import momentary_max  # noqa: E402
-from snare.patch import loads  # noqa: E402
-from snare.render import K, cause_of, db, domain, drive_headroom, output_stage, synthesize  # noqa: E402
+from halyard_synth.cli import REFERENCES, reference_text  # noqa: E402
+from halyard_synth.loudness import momentary_max  # noqa: E402
+from halyard_synth.patch import loads  # noqa: E402
+from halyard_synth.render import K, cause_of, db, domain, drive_headroom, output_stage, synthesize  # noqa: E402
 
 
 def measure(name: str, k: int, seeds: int) -> dict:

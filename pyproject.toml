@@ -1,27 +1,26 @@
 [build-system]
-requires = ["setuptools>=64"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.32"]
+build-backend = "hatchling.build"
 
 [project]
-name = "snare"
+name = "halyard-synth"  # the command is halyard
 version = "0.1.0"
-description = "A one-voice snare and clap synthesizer rendered offline to WAV"
+description = "A one-voice snare and clap synthesizer that renders a text patch to a sampler-ready WAV"
 readme = "README.md"
-requires-python = ">=3.11"
-dependencies = ["numpy>=1.24", "scipy>=1.14"]
+requires-python = ">=3.12"
+dependencies = ["numpy>=2.4", "scipy>=1.17"]
 
 [project.optional-dependencies]
-audition = ["sounddevice>=0.4"]
-test = ["pytest>=7", "soundfile>=0.12"]
+audition = ["sounddevice>=0.5"]
 
 [project.scripts]
-snare = "snare.cli:main"
+halyard = "halyard_synth.cli:main"
 
-[tool.setuptools]
-packages = ["snare"]
+[dependency-groups]
+dev = ["pytest>=9.1", "soundfile>=0.14"]
 
-[tool.setuptools.package-data]
-snare = ["data/*.json", "data/*.f64", "data/presets/*.toml"]
+[tool.uv]
+required-version = ">=0.13"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

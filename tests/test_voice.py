@@ -6,10 +6,10 @@ import pytest
 from conftest import EXAMPLE, make
 from scipy.optimize import least_squares
 
-from snare import noise
-from snare import voice as V
-from snare.curve import amplitude_curve, compressed, pitch_curve
-from snare.patch import loads
+from halyard_synth import noise
+from halyard_synth import voice as V
+from halyard_synth.curve import amplitude_curve, compressed, pitch_curve
+from halyard_synth.patch import loads
 
 RATE = 1536000  # 48 kHz at 32×
 

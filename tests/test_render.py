@@ -5,11 +5,11 @@ import numpy as np
 import pytest
 from conftest import EXAMPLE, make
 
-from snare import cli
-from snare import render as R
-from snare import voice as V
-from snare.loudness import momentary_max
-from snare.patch import loads
+from halyard_synth import cli
+from halyard_synth import render as R
+from halyard_synth import voice as V
+from halyard_synth.loudness import momentary_max
+from halyard_synth.patch import loads
 
 
 def amp(*points):
@@ -122,7 +122,7 @@ def test_report():
     assert "260.0 ms source, 261.9 ms exported (12571 samples at 48000 Hz, float32), seed 1" in text
     assert "predicted aliasing" in text and "margin" in text and "render" in text
     far = R.render(make(**HOT))[1]
-    assert not far.inside and "OUTSIDE" in str(far) and "snare verify" in str(far)
+    assert not far.inside and "OUTSIDE" in str(far) and "halyard verify" in str(far)
     # Output gain never moves the domain status: it is judged at unity gain.
     assert R.render(make(**{"output.db": -40.0}))[1].takes[0].domain == t.domain
     clap = R.render(loads(cli.reference_text("clap")))[1]
@@ -153,7 +153,7 @@ def test_domain_rule():
 def test_true_peak_catches_intersample_peaks():
     from scipy.signal.windows import tukey
 
-    from snare.loudness import true_peak
+    from halyard_synth.loudness import true_peak
 
     n = np.arange(4800)
     x = (0.5 * tukey(n.size, 0.2) * np.sin(2 * np.pi * 12000 / 48000 * n + np.pi / 4)).astype(np.float32)

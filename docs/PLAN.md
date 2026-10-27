@@ -230,7 +230,7 @@ Unchanged from the kick. The decimated signal is scaled by the output gain (gain
 
 ### 2.7 Dynamics
 
-A patch is one hit, and its levels are those of the hardest hit it will be played at. A softer hit of the same drum is a different patch. `snare softer PATCH DB` derives it and prints it like any other patch, so every change is visible and can be edited.
+A patch is one hit, and its levels are those of the hardest hit it will be played at. A softer hit of the same drum is a different patch. `halyard softer PATCH DB` derives it and prints it like any other patch, so every change is visible and can be edited.
 
 With v = 10^(−DB/20), the rewrite applies three rules from the physics of a struck head:
 
@@ -323,7 +323,7 @@ If voicing puts the Driven reference's wires within 3 dB of that boundary, beyon
 
 ## 4. Patch
 
-The patch is the complete, readable description of the sound. Every field is required and the renderer holds no defaults, so a future default can never change an old patch. `snare init` writes complete patches. The values below are illustrative, not voiced.
+The patch is the complete, readable description of the sound. Every field is required and the renderer holds no defaults, so a future default can never change an old patch. `halyard init` writes complete patches. The values below are illustrative, not voiced.
 
 ```toml
 instrument = "snare"
@@ -408,9 +408,9 @@ Every control has a single role, and the model stays small. Still, a three-mode 
 
 **Editing commands** rewrite points visibly and never add a parameter. Each prints a complete, canonical patch, so comments other than the canonical ones are not kept. Layers and knots are numbered from 1, in patch order, as the parser and the report number them.
 
-- `snare tune PATCH NOTE` sets `tune_hz` from a note name such as D3, or from a frequency in Hz. Modes, glide and rattle follow, since they are ratios. It fails, rather than clamping, when a mode or the glide would leave 10 Hz – 20 kHz.
-- `snare stretch PATCH CURVE... FACTOR [--after MS]` rescales the knot times of one or more curves after their peaks, as in the kick. `all` names every amplitude shape, so one command fits a whole sound to a tempo.
-- `snare bursts PATCH LAYER --count N --spacing MS [--start MS] [--growth G] [--rise MS] [--dip GAIN] [--taper T] [--tail MS]` rewrites a layer's shape as a clap train:
+- `halyard tune PATCH NOTE` sets `tune_hz` from a note name such as D3, or from a frequency in Hz. Modes, glide and rattle follow, since they are ratios. It fails, rather than clamping, when a mode or the glide would leave 10 Hz – 20 kHz.
+- `halyard stretch PATCH CURVE... FACTOR [--after MS]` rescales the knot times of one or more curves after their peaks, as in the kick. `all` names every amplitude shape, so one command fits a whole sound to a tempo.
+- `halyard bursts PATCH LAYER --count N --spacing MS [--start MS] [--growth G] [--rise MS] [--dip GAIN] [--taper T] [--tail MS]` rewrites a layer's shape as a clap train:
   - N bursts, from 1 to 10, the first starting at `start`;
   - each rises to its peak in `rise`, with a shoulder knot just after the peak, and dips to `dip` before the next;
   - each gap is `growth` times the previous one;
@@ -418,7 +418,7 @@ Every control has a single role, and the model stays small. Still, a three-mode 
   - the last burst decays to 0 over `tail`.
 
   The result is ordinary knots: at most 3N + 2, or 3N + 3 with a start, and the command fails beyond the 32-knot limit. Two layers with different bands and starts make a stacked clap.
-- `snare softer PATCH DB [--glide P] [--contact P]` prints the same drum struck DB softer (§2.7).
+- `halyard softer PATCH DB [--glide P] [--contact P]` prints the same drum struck DB softer (§2.7).
 
 ## 5. Domains
 
@@ -486,7 +486,7 @@ The larger gaps, up to 2.3 dB on 3 fixtures, come from an output peak that moves
 
 Once measured, the domain is also published as a rule of thumb. The prototype's figures at 32× are about 20 dB of noise level + drive for a 2–9 kHz layer, 18 dB for 1–16 kHz, and 34 dB for a clap's 800–2500 Hz band. They come from bisection, so an island can bring the first change of status slightly lower; the grid gives the real figures.
 
-`snare verify` runs the reference comparison on any single patch or set of takes, so settings outside the declared domain can still be checked one by one.
+`halyard verify` runs the reference comparison on any single patch or set of takes, so settings outside the declared domain can still be checked one by one.
 
 ## 6. Repeatability
 
@@ -547,11 +547,11 @@ A file contains:
 - a `smpl` chunk with the root note from `tune_hz`, omitted when the body is silent;
 - a private `snar` chunk with the patch text and provenance: the seed, the take and set gains, the renderer version and the decimator checksum.
 
-`snare extract` recovers the exact patch.
+`halyard extract` recovers the exact patch.
 
 ### 7.3 Packs
 
-`snare pack PATCH... --out DIR [--takes N] [--key K] [--level-match]` renders a multisample. Each patch is one velocity layer, loudest first, and each layer gets N takes.
+`halyard pack PATCH... --out DIR [--takes N] [--key K] [--level-match]` renders a multisample. Each patch is one velocity layer, loudest first, and each layer gets N takes.
 
 - The patches must share their output settings, and their measured loudness must fall from each layer to the next.
 - Files are named `<stem>_v<top velocity>_rr<take>.wav`, such as `snare_v127_rr1.wav`, so they also map by hand in samplers that do not read SFZ.
@@ -596,17 +596,17 @@ For a snare:
 ### 7.6 Commands
 
 ```
-snare init crack --tune D3 > snare.toml              # writes tune_hz = 146.832; the patch stays in Hz
-snare audition snare.toml --watch --bpm 92 --with groove.wav
-snare audition snare.toml --watch --against favourite.wav [--blind]
-snare render snare.toml --out snare.wav [--takes 8] [--level-match]
-snare verify snare.toml [--takes 8]
-snare extract snare.wav > snare.toml
-snare tune snare.toml F3
-snare stretch snare.toml all 0.8
-snare bursts clap.toml 'noise[1]' --count 4 --spacing 11
-snare softer snare.toml 12 > snare-12.toml
-snare pack snare.toml snare-8.toml snare-16.toml snare-24.toml --takes 6 --out kit/
+halyard init crack --tune D3 > snare.toml              # writes tune_hz = 146.832; the patch stays in Hz
+halyard audition snare.toml --watch --bpm 92 --with groove.wav
+halyard audition snare.toml --watch --against favourite.wav [--blind]
+halyard render snare.toml --out snare.wav [--takes 8] [--level-match]
+halyard verify snare.toml [--takes 8]
+halyard extract snare.wav > snare.toml
+halyard tune snare.toml F3
+halyard stretch snare.toml all 0.8
+halyard bursts clap.toml 'noise[1]' --count 4 --spacing 11
+halyard softer snare.toml 12 > snare-12.toml
+halyard pack snare.toml snare-8.toml snare-16.toml snare-24.toml --takes 6 --out kit/
 ```
 
 A typical session goes like this:
@@ -733,7 +733,7 @@ Anything else needs its own evidence.
 - Development only: SciPy's filter design.
 - Tests: adaptive quadrature and an independent WAV reader such as `soundfile`.
 
-It installs with pip as one package with a `snare` command, and its tests run on Linux, macOS and Windows.
+It installs with pip as one package with a `halyard` command, and its tests run on Linux, macOS and Windows.
 
 **Modules.**
 

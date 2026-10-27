@@ -1,4 +1,4 @@
-# snare
+# Halyard
 
 A one-voice snare and clap synthesizer, rendered offline to mono WAV. It
 implements the *Snare/Clap Synth design and implementation plan, revision 4*
@@ -23,24 +23,24 @@ Python 3.11 or later.
 
 ```
 pip install -e .              # NumPy and SciPy
-pip install -e '.[audition]'  # adds sounddevice (needs PortAudio) for `snare audition`
+pip install -e '.[audition]'  # adds sounddevice (needs PortAudio) for `halyard audition`
 pip install -e '.[test]'      # pytest and soundfile, for the test suite
 ```
 
 ## Use
 
 ```
-snare init crack --tune D3 > snare.toml               # a complete starting patch (writes tune_hz = 146.832)
-snare audition snare.toml --watch --bpm 92 --with groove.wav   # on the backbeat, over the track's loop
-snare audition snare.toml --watch --against favourite.wav --blind
-snare render snare.toml --out snare.wav --takes 8      # round-robin takes snare_rr1.wav … snare_rr8.wav
-snare verify snare.toml --takes 8                      # each take against its reference render
-snare extract snare_rr3.wav > take3.toml               # the exact patch of any exported file
-snare tune snare.toml F3                               # retune: modes, glide and rattle follow
-snare stretch snare.toml all 0.8                       # fit every shape to a tempo
-snare bursts clap.toml 'noise[1]' --count 4 --spacing 11   # a clap train as ordinary knots
-snare softer snare.toml 12 > snare-12.toml             # the same drum struck 12 dB softer
-snare pack snare.toml snare-8.toml snare-16.toml snare-24.toml --takes 6 --out kit/
+halyard init crack --tune D3 > snare.toml               # a complete starting patch (writes tune_hz = 146.832)
+halyard audition snare.toml --watch --bpm 92 --with groove.wav   # on the backbeat, over the track's loop
+halyard audition snare.toml --watch --against favourite.wav --blind
+halyard render snare.toml --out snare.wav --takes 8      # round-robin takes snare_rr1.wav … snare_rr8.wav
+halyard verify snare.toml --takes 8                      # each take against its reference render
+halyard extract snare_rr3.wav > take3.toml               # the exact patch of any exported file
+halyard tune snare.toml F3                               # retune: modes, glide and rattle follow
+halyard stretch snare.toml all 0.8                       # fit every shape to a tempo
+halyard bursts clap.toml 'noise[1]' --count 4 --spacing 11   # a clap train as ordinary knots
+halyard softer snare.toml 12 > snare-12.toml             # the same drum struck 12 dB softer
+halyard pack snare.toml snare-8.toml snare-16.toml snare-24.toml --takes 6 --out kit/
 ```
 
 The six references are `tone`, `crack`, `fat`, `driven`, `clap` and `snap`.
@@ -226,18 +226,18 @@ sample-replacement benchmark.
 
 | Module | Responsibility |
 |---|---|
-| `snare/patch.py` | schema, parsing, validation, canonical TOML; `tune`, `stretch`, `bursts`, `softer`; tuning helpers |
-| `snare/curve.py` | Hermite curves, PCHIP slopes, exact integrals, knot jumps, decay compression |
-| `snare/noise.py` | seeded noise, coherent layer tables (cached), values and slopes between samples, seeded dither |
-| `snare/voice.py` | modal body, noise layers with rattle, drive; knee slew at every drive, kink bound |
-| `snare/render.py` | rates, frozen decimators, parallel decimation, domain rule and drive headroom, takes, report, export |
-| `snare/loudness.py` | BS.1770 K-weighting at every rate, momentary loudness, true peak |
-| `snare/pack.py` | velocity layers, takes, one gain per pack, the SFZ mapping |
-| `snare/reference.py` | the reference renderer and comparison behind `snare verify` |
-| `snare/wav.py` | RIFF writing and reading, float and PCM |
-| `snare/audition.py` | hits on the beat grid, patches and takes cycling, beds, A/B and blind order, watching, playback |
-| `snare/cli.py` | commands |
-| `snare/data/` | frozen decimators and checksums, the six references |
+| `src/halyard_synth/patch.py` | schema, parsing, validation, canonical TOML; `tune`, `stretch`, `bursts`, `softer`; tuning helpers |
+| `src/halyard_synth/curve.py` | Hermite curves, PCHIP slopes, exact integrals, knot jumps, decay compression |
+| `src/halyard_synth/noise.py` | seeded noise, coherent layer tables (cached), values and slopes between samples, seeded dither |
+| `src/halyard_synth/voice.py` | modal body, noise layers with rattle, drive; knee slew at every drive, kink bound |
+| `src/halyard_synth/render.py` | rates, frozen decimators, parallel decimation, domain rule and drive headroom, takes, report, export |
+| `src/halyard_synth/loudness.py` | BS.1770 K-weighting at every rate, momentary loudness, true peak |
+| `src/halyard_synth/pack.py` | velocity layers, takes, one gain per pack, the SFZ mapping |
+| `src/halyard_synth/reference.py` | the reference renderer and comparison behind `halyard verify` |
+| `src/halyard_synth/wav.py` | RIFF writing and reading, float and PCM |
+| `src/halyard_synth/audition.py` | hits on the beat grid, patches and takes cycling, beds, A/B and blind order, watching, playback |
+| `src/halyard_synth/cli.py` | commands |
+| `src/halyard_synth/data/` | frozen decimators and checksums, the six references |
 
 ## Status
 

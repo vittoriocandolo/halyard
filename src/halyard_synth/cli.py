@@ -1,4 +1,4 @@
-"""Command line (plan §7.6): snare init | render | verify | extract | audition | pack, and the editing commands
+"""Command line (plan §7.6): halyard init | render | verify | extract | audition | pack, and the editing commands
 tune | stretch | bursts | softer, which print a complete, canonical patch."""
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ REFERENCES = ("tone", "crack", "fat", "driven", "clap", "snap")
 
 
 def reference_text(name: str) -> str:
-    return resources.files("snare").joinpath("data", "presets", f"{name}.toml").read_text(encoding="utf-8")
+    return resources.files("halyard_synth").joinpath("data", "presets", f"{name}.toml").read_text(encoding="utf-8")
 
 
 def _read(path: str) -> str:
@@ -206,7 +206,7 @@ def _finite(text: str) -> float:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="snare", description="A one-voice snare and clap synthesizer.")
+    ap = argparse.ArgumentParser(prog="halyard", description="A one-voice snare and clap synthesizer.")
     sub = ap.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("init", help="print a complete starting patch")
@@ -306,7 +306,7 @@ def main(argv=None) -> int:
         return args.run(args)
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 1
-    except BrokenPipeError:  # the reader went away, as `snare render … | head` does: the files are written
+    except BrokenPipeError:  # the reader went away, as `halyard render … | head` does: the files are written
         sys.stderr.close()
         return 0
 

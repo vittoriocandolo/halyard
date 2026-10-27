@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 import soundfile
 
-from snare import cli, wav
-from snare import pack as K
-from snare.loudness import momentary_max
-from snare.patch import dumps, loads, softer
+from halyard_synth import cli, wav
+from halyard_synth import pack as K
+from halyard_synth.loudness import momentary_max
+from halyard_synth.patch import dumps, loads, softer
 
 
 def parse_sfz(text):

@@ -7,7 +7,7 @@ import pytest
 from conftest import make
 from scipy.signal import upfirdn
 
-from snare import render as R
+from halyard_synth import render as R
 
 # (base, K, taps, length in ms, 99% of the energy within, in ms), as plan §3 records them.
 FILTERS = [
@@ -44,7 +44,7 @@ def test_frozen_designs(base, k, taps, length_ms, energy_ms):
 @pytest.mark.parametrize("base, k", [(44100, 32), (48000, 32), (48000, 16)])
 def test_checksum_is_enforced(base, k):
     entry = R.manifest()["filters"][f"{base}x{k}"]
-    raw = resources.files("snare").joinpath("data", entry["file"]).read_bytes()
+    raw = resources.files("halyard_synth").joinpath("data", entry["file"]).read_bytes()
     assert hashlib.sha256(raw).hexdigest() == entry["sha256"]
     assert np.array_equal(R.load_taps(raw, entry), R.decimator(base, k).taps)
     tampered = bytearray(raw)
