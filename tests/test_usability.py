@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The usability tasks of plan §8.4, from each reference patch.
 
 Each task takes at most three field edits or one command, and must move the

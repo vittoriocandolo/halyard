@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The frozen validated-domain rule against the recorded adversarial grid (plan §8.3).
 
 The grid itself takes minutes (tools/grid.py run); this re-checks the rule's

@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Loudness after ITU-R BS.1770, for the report, level matching, packs and audition (plan §7.4).
 
 K-weighting is a high shelf of about +4 dB above 1.7 kHz followed by a

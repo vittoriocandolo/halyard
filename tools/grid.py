@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The adversarial grid (plan §8.3): combined corners of the valid domain.
 
 Every fixture is rendered by the shipping path and compared with its reference

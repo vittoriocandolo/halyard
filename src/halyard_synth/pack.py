@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Packs: velocity layers with round-robin takes and an SFZ mapping (plan §7.3).
 
 Each patch is one velocity layer, loudest first, and each layer gets the same

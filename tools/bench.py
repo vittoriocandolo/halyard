@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Performance check (plan §3, §8.1): render time and memory on this machine.
 
 Each case runs in a fresh interpreter after numpy, scipy and halyard_synth are

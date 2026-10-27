@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The modal body, the noise layers and the drive as pure functions of time (plan §2.3–§2.5, §3, §5).
 
     x(t) = b(t) + Σ_j w_j(t),    y(t) = S_α(x(t))

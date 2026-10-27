@@ -7,7 +7,10 @@ name = "halyard-synth"  # the command is halyard
 version = "0.1.0"
 description = "A one-voice snare and clap synthesizer that renders a text patch to a sampler-ready WAV"
 readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
+authors = [{ name = "Vittorio Candolo" }]
 dependencies = ["numpy>=2.4", "scipy>=1.17"]
 
 [project.optional-dependencies]

@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Write the golden renders that tests/test_golden.py compares against (plan §10).
 
 Golden files begin once the rendering policy is frozen (milestone 2). Only

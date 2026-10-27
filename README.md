@@ -248,3 +248,13 @@ sample-replacement benchmark.
 | 3. Audition and delivery | Done here with a simulated device: exact buffers, stale renders dropped, swaps at hit boundaries, patches and takes cycling, the bed on the grid. Packs parse back from their SFZ with the right velocity and take mapping. Playing through a real device and loading packs in two SFZ players needs you. |
 | 4. Voicing | By measurement: the references are loudness-matched, inside with 16 dB or more of drive headroom for seeds 1–16, and every usability task moves its measurement the right way. Approval by ear, in context and across takes and strengths, needs you. |
 | 5. Benchmark | Protocol written (BENCHMARK.md); it needs your samples and your ears. |
+
+## License
+
+Halyard is free software, under the [GNU General Public License](LICENSE),
+version 3 or later.
+
+The sounds you make with it are yours. An additional permission in
+[NOTICE](NOTICE) lets you use the sounds Halyard renders, the patches and
+SFZ maps it writes, and its reference patches under any terms you choose, in a
+track or in a sample pack you sell.

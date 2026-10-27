@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The reference method behind `halyard verify` and the adversarial grid (plan §8.2).
 
 The shipping output is D(y_F), where y_F[n] = y(n / F) and D is the frozen

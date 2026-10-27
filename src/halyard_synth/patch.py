@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The patch: a complete, readable description of one hit (plan §4, §5).
 
 Every field is required and the renderer holds no defaults, so a future

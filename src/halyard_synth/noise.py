@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Seeded continuous-time Gaussian noise for the layers (plan §2.4, §6).
 
     n_j(t) = γ_j Σ_{k=1}^{20000} |H_j(f_k)| ρ_k cos(2π f_k t + θ_k),    f_k = k Hz

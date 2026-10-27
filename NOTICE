@@ -1,0 +1,28 @@
+Halyard, a snare and clap synthesizer
+Copyright (C) 2026 Vittorio Candolo
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program, in the file LICENSE. If not, see <https://www.gnu.org/licenses/>.
+
+
+Additional permission under GNU GPL version 3 section 7
+
+The files that Halyard writes can contain parts of Halyard: a patch file
+can start as a copy of a reference patch, and every WAV file embeds its patch.
+As an additional permission, the licensors of Halyard grant you permission
+to use, copy, modify and distribute the following under terms of your choice,
+together with any parts of Halyard they contain:
+
+- sounds rendered with Halyard, including the patch and the provenance data
+  embedded in them;
+- patch files and SFZ maps written by Halyard;
+- Halyard's reference patches, wherever they appear.

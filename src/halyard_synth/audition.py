@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Audition: play the exact render buffers in context, and re-render on every edit (plan §7.5).
 
 Hits are unchoked one-shots: each plays its buffer to the end, so overlapping

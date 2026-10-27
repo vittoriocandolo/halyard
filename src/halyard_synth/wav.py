@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """A small RIFF writer and reader for mono WAV: IEEE float32, or PCM at 24 or 16 bits (plan §7.2).
 
 Files carry fmt, fact (float only), smpl (so samplers map the root key; left

@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The report's drive headroom against brute force, on the adversarial grid (plan §5, §8.1).
 
 For every grid fixture, the headroom that the report computes from one

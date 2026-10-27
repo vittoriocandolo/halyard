@@ -1,3 +1,6 @@
+# Copyright (C) 2026 Vittorio Candolo
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Design the frozen decimators (plan §3) and write them to src/halyard_synth/data.
 
 The renderer never designs filters: it loads these coefficients and checks
