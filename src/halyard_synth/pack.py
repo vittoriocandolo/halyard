@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import math
+import multiprocessing
 import os
 import sys
 import time
@@ -232,7 +233,10 @@ def _render(
     jobs = [dataclasses.replace(p, seed=s) for (_, p), ss in zip(patches, seeds, strict=True) for s in ss]
     n = min(len(jobs), workers or os.cpu_count() or 1)
     if n > 1:
-        with ProcessPoolExecutor(n) as pool:
+        # Workers start from a fork server, or fresh where there is none (Windows), never by forking the caller: a
+        # thread of the caller holding a lock, such as the table cache's, would leave a worker deadlocked on it.
+        method = "forkserver" if "forkserver" in multiprocessing.get_all_start_methods() else "spawn"
+        with ProcessPoolExecutor(n, mp_context=multiprocessing.get_context(method)) as pool:
             done = list(pool.map(_synthesize, jobs))
     else:
         done = [_synthesize(p) for p in jobs]
@@ -366,7 +370,7 @@ def write(pk: Pack, folder: str | os.PathLike[str]) -> list[Path]:
             )
             written.append(path)
     sfz = out_dir / f"{pk.stem}.sfz"
-    sfz.write_text(pk.sfz(), encoding="utf-8")
+    sfz.write_text(pk.sfz(), encoding="utf-8", newline="\n")  # the same bytes on every platform
     written.append(sfz)
     return written
 

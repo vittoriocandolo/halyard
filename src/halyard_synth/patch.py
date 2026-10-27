@@ -17,6 +17,7 @@ patch they print stays readable.
 
 from __future__ import annotations
 
+import codecs
 import dataclasses
 import itertools
 import math
@@ -520,9 +521,19 @@ def loads(text: str) -> Patch:
     return from_dict(data)
 
 
+def read_text(path: str | os.PathLike[str]) -> str:
+    """Read a patch file's text: UTF-8 with or without a BOM, or UTF-16 with one, as Windows PowerShell's `>` writes."""
+    raw = Path(path).read_bytes()
+    return raw.decode("utf-16" if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else "utf-8-sig")
+
+
 def load(path: str | os.PathLike[str]) -> Patch:
-    """Read a patch file."""
-    return loads(Path(path).read_text(encoding="utf-8"))
+    """Read a patch from a TOML file, in UTF-8 or UTF-16."""
+    try:
+        text = read_text(path)
+    except UnicodeDecodeError:
+        raise PatchError(["not UTF-8 or UTF-16 text"]) from None
+    return loads(text)
 
 
 def to_dict(p: Patch) -> dict[str, Any]:

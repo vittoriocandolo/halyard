@@ -683,3 +683,17 @@ def test_the_device_stream_plays_the_mix_or_says_why_it_cannot(monkeypatch: pyte
     monkeypatch.setitem(sys.modules, "sounddevice", None)  # as if it were not installed
     with pytest.raises(RuntimeError, match="needs the sounddevice package and PortAudio"):
         audition.device_stream(DEVICE, 1, lambda frames: np.zeros(frames, dtype=np.float32))
+
+
+def test_a_patch_that_is_not_text_is_refused_and_a_half_saved_one_waited_for(tmp_path: Path) -> None:
+    """Refuse a patch that is not UTF-8 or UTF-16 at the start, and wait while a watched one cannot be read."""
+    path = tmp_path / "binary.toml"
+    path.write_bytes(b"instrument = \xff\n")
+    with pytest.raises(audition.AuditionError, match="not UTF-8 or UTF-16 text"):
+        audition.Session(path, out=Collect([]))
+    path.write_text(EXAMPLE, encoding="utf-16")
+    session = audition.Session(path, audition.Settings(watch=True), out=Collect([]))
+    edit_bytes = b"instrument = \xff\n"
+    path.write_bytes(edit_bytes)
+    session.poll()  # caught mid-save: nothing starts
+    assert session.watchers[0].generation == 0

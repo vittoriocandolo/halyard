@@ -3,10 +3,12 @@
 
 """The patch: parsing, every problem it names, canonical TOML, and the editing commands (plan §4, §5)."""
 
+import codecs
 import copy
 import dataclasses
 import math
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -842,3 +844,21 @@ def test_softer_keeps_the_knots_inside_a_rise_in_their_place() -> None:
     factor = 10 ** (12 / 20 * 0.2)
     assert rise[2][0] == pytest.approx(0.1 * factor, abs=1e-3)
     assert rise[1][0] == pytest.approx(rise[2][0] / 2, abs=1e-3)
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"])
+def test_patches_are_read_in_utf8_or_utf16(tmp_path: Path, encoding: str) -> None:
+    """Read a patch written in UTF-8, with or without a BOM, or in UTF-16 with one in either byte order."""
+    path = tmp_path / "snare.toml"
+    bom = {"utf-16-le": codecs.BOM_UTF16_LE, "utf-16-be": codecs.BOM_UTF16_BE}.get(encoding, b"")
+    path.write_bytes(bom + EXAMPLE.encode(encoding))
+    assert patch.load(path) == loads(EXAMPLE)
+
+
+def test_a_patch_that_is_not_text_is_refused(tmp_path: Path) -> None:
+    """Refuse a file that is neither UTF-8 nor UTF-16."""
+    path = tmp_path / "binary.toml"
+    path.write_bytes(b"\xff\xfe\x00\xd8" + b"\xff" * 7)  # a UTF-16 BOM, then no valid text
+    assert problems(patch.load, path) == ["not UTF-8 or UTF-16 text"]
+    path.write_bytes(b"instrument = \xff\n")
+    assert problems(patch.load, path) == ["not UTF-8 or UTF-16 text"]

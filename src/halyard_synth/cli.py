@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from . import wav
 from .audition import Settings, audition
 from .pack import Options, pack
-from .patch import Patch, PatchError, Train, bursts, dumps, loads, softer, stretch, tune
+from .patch import Patch, PatchError, Train, bursts, dumps, load, loads, softer, stretch, tune
 from .reference import verify
 from .render import FORMATS, RenderError, db, export, render_takes
 
@@ -52,12 +52,10 @@ def _listing(head: str, problems: Sequence[str]) -> CliError:
 def _patch(path: str) -> Patch:
     """Read a patch file."""
     try:
-        text = Path(path).read_text(encoding="utf-8")
+        return load(path)
     except OSError as e:
         msg = f"{path}: {e.strerror}"
         raise CliError(msg) from None
-    try:
-        return loads(text)
     except PatchError as e:
         msg = f"{path}: invalid patch"
         raise _listing(msg, e.problems) from None
