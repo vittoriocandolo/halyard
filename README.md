@@ -19,13 +19,16 @@ control, recipes and how to read the report.
 
 ## Install
 
-Python 3.11 or later.
+Halyard needs Python 3.12 or later.
 
 ```
-pip install -e .              # NumPy and SciPy
-pip install -e '.[audition]'  # adds sounddevice (needs PortAudio) for `halyard audition`
-pip install -e '.[test]'      # pytest and soundfile, for the test suite
+uv tool install "halyard-synth[audition]"
 ```
+
+or `pipx install "halyard-synth[audition]"`. The `audition` extra adds live
+playback through sounddevice and PortAudio; without it every other command
+works. From a checkout, `uv tool install ".[audition]"`; to work on Halyard,
+see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Use
 
