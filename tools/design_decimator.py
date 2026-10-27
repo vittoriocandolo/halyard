@@ -23,61 +23,78 @@ import json
 import math
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import scipy
 from scipy.signal import firwin, kaiserord, minimum_phase
+
+from tools import say
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from numpy.typing import NDArray
+
+    type Floats = NDArray[np.float64]
 
 PASS_HZ = 20000.0
 ATTENUATION_DB = 116.0
 N_FFT = 2**20
 BASES = (44100, 48000)
 SHIPPED_K = (16, 32, 64)
+AGREE = 1e-12  # how close a fresh design must come to the shipped one
 DATA = Path(__file__).resolve().parent.parent / "src" / "halyard_synth" / "data"
 
 
-def design(base: int, K: int) -> np.ndarray:
-    rate = base * K
+def design(base: int, k: int) -> Floats:
+    """Design the decimator for a base rate at factor k."""
+    rate = base * k
     numtaps, beta = kaiserord(ATTENUATION_DB, (base / 2 - PASS_HZ) / (rate / 2))
     numtaps += 1 - numtaps % 2  # odd length: a type I prototype
     prototype = firwin(numtaps, (PASS_HZ + base / 2) / 2, window=("kaiser", beta), fs=rate)
     return normalize(minimum_phase(prototype, method="homomorphic", n_fft=N_FFT, half=False))
 
 
-def normalize(h: np.ndarray) -> np.ndarray:
-    """Unit DC gain: nudge the largest tap until the exactly rounded sum is 1."""
-    h = h / math.fsum(h)
+def normalize(taps: Floats) -> Floats:
+    """Give the taps unit DC gain: nudge the largest tap until the exactly rounded sum is 1."""
+    h = taps / math.fsum(taps)
     k = int(np.argmax(np.abs(h)))
     for _ in range(64):
         residual = 1.0 - math.fsum(h)
         if residual == 0.0:
             return h
         h[k] += residual
-    raise RuntimeError("could not normalize the taps")
+    msg = "could not normalize the taps"
+    raise RuntimeError(msg)
 
 
-def measure(h: np.ndarray, base: int, K: int) -> dict:
-    rate = base * K
+def measure(h: Floats, base: int, k: int) -> dict[str, float]:
+    """Measure a design: its passband deviation, stopband, length and where 99% of its energy lies."""
+    rate = base * k
     n = 2**23
-    H = np.abs(np.fft.rfft(h, n))
-    f = np.arange(H.size) * rate / n
+    response = np.abs(np.fft.rfft(h, n))
+    f = np.arange(response.size) * rate / n
     energy = np.cumsum(h**2) / np.sum(h**2)
     return {
-        "passband_db": float(np.max(np.abs(20 * np.log10(H[f <= PASS_HZ])))),
-        "stopband_db": float(-20 * np.log10(np.max(H[f >= base / 2]))),
+        "passband_db": float(np.max(np.abs(20 * np.log10(response[f <= PASS_HZ])))),
+        "stopband_db": float(-20 * np.log10(np.max(response[f >= base / 2]))),
         "length_ms": 1000 * h.size / rate,
         "energy99_ms": 1000 * int(np.searchsorted(energy, 0.99)) / rate,
     }
 
 
-def checksum(h: np.ndarray) -> str:
+def checksum(h: Floats) -> str:
+    """Return the SHA-256 of the taps as little-endian float64."""
     return hashlib.sha256(np.asarray(h, dtype="<f8").tobytes()).hexdigest()
 
 
-def main(argv=None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
+    """Design every shipped decimator, and write it, or with --check compare it with the shipped one."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--check", action="store_true", help="compare a fresh design with the shipped data")
     args = ap.parse_args(argv)
+    filters: dict[str, dict[str, Any]] = {}
     manifest = {
         "design": {
             "method": "Kaiser linear-phase prototype, minimum_phase(method='homomorphic', half=False), "
@@ -88,36 +105,36 @@ def main(argv=None) -> int:
             "numpy": np.__version__,
             "scipy": scipy.__version__,
         },
-        "filters": {},
+        "filters": filters,
     }
     status = 0
-    for K in SHIPPED_K:
+    for k in SHIPPED_K:
         for base in BASES:
-            h = design(base, K)
-            name = f"{base}x{K}"
-            entry = {
+            h = design(base, k)
+            name = f"{base}x{k}"
+            entry: dict[str, Any] = {
                 "base": base,
-                "K": K,
-                "rate": base * K,
+                "K": k,
+                "rate": base * k,
                 "taps": int(h.size),
                 "file": f"decimator-{name}.f64",
                 "sha256": checksum(h),
-                **measure(h, base, K),
+                **measure(h, base, k),
             }
-            manifest["filters"][name] = entry
-            print(
+            filters[name] = entry
+            say(
                 f"{name}: {h.size} taps, {entry['length_ms']:.2f} ms, 99% energy in {entry['energy99_ms']:.2f} ms, "
-                f"passband {entry['passband_db']:.1e} dB, stopband {entry['stopband_db']:.1f} dB"
+                f"passband {entry['passband_db']:.1e} dB, stopband {entry['stopband_db']:.1f} dB",
             )
             if args.check:
                 shipped = np.fromfile(DATA / entry["file"], dtype="<f8")
                 diff = np.max(np.abs(shipped - h)) if shipped.size == h.size else math.inf
-                print(f"  shipped vs fresh design: max difference {diff:.1e}")
-                status |= int(diff > 1e-12)
+                say(f"  shipped vs fresh design: max difference {diff:.1e}")
+                status |= int(diff > AGREE)
             else:
                 h.astype("<f8").tofile(DATA / entry["file"])
     if not args.check:
-        (DATA / "decimators.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        (DATA / "decimators.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return status
 
 

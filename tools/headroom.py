@@ -29,44 +29,57 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from halyard_synth.patch import from_dict
 from halyard_synth.render import DRIVE_MAX, HEADROOM_STEP_DB, _drives, domain, render, synthesize
-from tools import grid
+from tools import grid, say
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
+    from halyard_synth.voice import Knees
+    from tools.grid import Edits, Row
+
+    type Job = tuple[str, str, Edits, bool]  # (family, name, edits, whether to scan densely)
 
 FIELDS = ["family", "name", "drive", "inside", "estimate", "reference", "error", "dense", "renders", "seconds", "edits"]
 BISECT = 16  # halvings of a candidate bracket: 0.5 dB / 2¹⁶ ≈ 10⁻⁵ dB
 DENSE_STEP_DB, DENSE_RANGE_DB = 0.05, 6.0
+EXACT_DB = 0.001  # a report this close to the brute force is exact
+NEAR_DB = 3.0  # an edge this close to the fixture's drive is where the report matters most
+SIDE = 1e-12  # just before or after a drop of the knee slew, relatively
 
 
-def status(edits: dict, drive: float) -> bool:
-    """Inside the validated domain, from a full render at that drive."""
+def status(edits: Edits, drive: float) -> bool:
+    """Say whether a fixture is inside the validated domain, from a full render at that drive."""
     return domain(synthesize(from_dict(grid.patch_dict({**edits, "drive.db": float(drive)})))).inside
 
 
-def candidates(knees, d0: float, up: bool) -> list[float]:
-    """The drives the report's search visits, in search order."""
+def candidates(knees: Knees, d0: float, *, up: bool) -> list[float]:
+    """Return the drives the report's search visits, in search order."""
     drops = knees.drops()
-    sides = np.concatenate((drops * (1.0 - 1e-12), drops * (1.0 + 1e-12)))
+    sides = np.concatenate((drops * (1.0 - SIDE), drops * (1.0 + SIDE)))
     jumps = [float(d) for d in _drives(sides)]
     if up:
-        steps = list(np.arange(d0 + HEADROOM_STEP_DB, DRIVE_MAX, HEADROOM_STEP_DB)) + [DRIVE_MAX]
-        return sorted({float(d) for d in steps + jumps if d0 < d <= DRIVE_MAX})
-    steps = list(np.arange(d0 - HEADROOM_STEP_DB, 0.0, -HEADROOM_STEP_DB)) + [0.0]
-    return sorted({float(d) for d in steps + jumps if 0.0 <= d < d0}, reverse=True)
+        steps = [*(float(d) for d in np.arange(d0 + HEADROOM_STEP_DB, DRIVE_MAX, HEADROOM_STEP_DB)), DRIVE_MAX]
+        return sorted({d for d in steps + jumps if d0 < d <= DRIVE_MAX})
+    steps = [*(float(d) for d in np.arange(d0 - HEADROOM_STEP_DB, 0.0, -HEADROOM_STEP_DB)), 0.0]
+    return sorted({d for d in steps + jumps if 0.0 <= d < d0}, reverse=True)
 
 
-def run_one(args) -> dict:
-    family, name, edits, dense = args
+def run_one(job: Job) -> Row:
+    """Compare a fixture's reported drive headroom with full renders, searching as the report does."""
+    family, name, edits, dense = job
     p = from_dict(grid.patch_dict(edits))
     t0 = time.perf_counter()
     take = render(p)[1].takes[0]
     d0, here = p.drive.db, take.inside
     h = take.headroom
     estimate = (
-        math.nan if h is None else (h.edge_db if h.edge_db is not None else (math.inf if h.db > 0 else -math.inf))
+        math.nan if h is None else (h.edge_db if not math.isnan(h.edge_db) else (math.inf if h.db > 0 else -math.inf))
     )
     reference, renders = (math.inf if here else -math.inf), 0
     if h is not None:
@@ -116,12 +129,17 @@ def run_one(args) -> dict:
     }
 
 
-def run(args) -> None:
+def run(args: argparse.Namespace) -> None:
+    """Run every grid fixture not yet in the CSV, in parallel processes, appending each row as it finishes."""
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    done = {(r["family"], r["name"]) for r in csv.DictReader(Path(out).read_text(encoding="utf-8").splitlines())} if out.exists() else set()
+    done = (
+        {(r["family"], r["name"]) for r in csv.DictReader(Path(out).read_text(encoding="utf-8").splitlines())}
+        if out.exists()
+        else set()
+    )
     jobs = [(fam, name, edits, args.dense) for fam, name, edits in grid.fixtures() if (fam, name) not in done]
-    print(f"{len(jobs)} fixtures to run ({len(done)} already in {out})", flush=True)
+    say(f"{len(jobs)} fixtures to run ({len(done)} already in {out})")
     start = time.perf_counter()
     fresh = not out.exists()
     with Path(out).open("a", newline="", encoding="utf-8") as f, ProcessPoolExecutor(max_workers=args.workers) as pool:
@@ -131,13 +149,14 @@ def run(args) -> None:
         for i, row in enumerate(pool.map(run_one, jobs, chunksize=1)):
             w.writerow(row)
             f.flush()
-            if (i + 1) % 25 == 0:
-                print(f"  {i + 1}/{len(jobs)} after {time.perf_counter() - start:.0f} s", flush=True)
-    print(f"done in {time.perf_counter() - start:.0f} s")
+            if (i + 1) % grid.REPORT_EVERY == 0:
+                say(f"  {i + 1}/{len(jobs)} after {time.perf_counter() - start:.0f} s")
+    say(f"done in {time.perf_counter() - start:.0f} s")
 
 
-def load(path) -> list[dict]:
-    rows = list(csv.DictReader(Path(path).read_text(encoding="utf-8").splitlines()))
+def load(path: str | os.PathLike[str]) -> list[Row]:
+    """Read the comparison's results."""
+    rows: list[Row] = list(csv.DictReader(Path(path).read_text(encoding="utf-8").splitlines()))
     for r in rows:
         for key in ("drive", "estimate", "reference", "error", "dense", "seconds"):
             r[key] = float(r[key])
@@ -146,11 +165,16 @@ def load(path) -> list[dict]:
     return rows
 
 
-def split_infinite(rows) -> tuple[list, list, list]:
-    """Of the fixtures whose status full renders never change within 0–48 dB: the silent ones (no headroom is
-    reported for silence), the ones where the report is cautious (a finite edge where the status stays inside),
-    and the ones where it is wrong (anything else that disagrees)."""
-    silent, cautious, wrong = [], [], []
+def split_infinite(rows: Iterable[Row]) -> tuple[list[Row], list[Row], list[Row]]:
+    """Sort the fixtures whose status full renders never change within 0–48 dB, where the report disagrees.
+
+    Into the silent ones (no headroom is reported for silence), the ones where
+    the report is cautious (a finite edge where the status stays inside), and
+    the ones where it is wrong (anything else that disagrees).
+    """
+    silent: list[Row] = []
+    cautious: list[Row] = []
+    wrong: list[Row] = []
     for r in rows:
         if r["estimate"] == r["reference"]:
             continue
@@ -163,58 +187,63 @@ def split_infinite(rows) -> tuple[list, list, list]:
     return silent, cautious, wrong
 
 
-def analyze(args) -> None:
+def _finite(finite: list[Row]) -> None:
+    """Report how far the report's edge lies from the brute force's, where full renders find one."""
+    errors = np.array([r["error"] for r in finite])
+    say(
+        f"  an edge within 0–48 dB: {len(finite)}; error of the report (+ is optimistic): "
+        f"max {errors.max():+.5f} dB, min {errors.min():+.4f} dB, median {np.median(errors):+.5f} dB",
+    )
+    say(f"    exact to 0.001 dB: {int(np.sum(np.abs(errors) < EXACT_DB))}")
+    for lo, hi in ((0.001, 0.1), (0.1, 0.5), (0.5, 1.0), (1.0, math.inf)):
+        n = sum(1 for e in errors if lo <= -e < hi)
+        say(f"    conservative by {lo:g}–{hi:g} dB: {n}")
+    near = [r for r in finite if abs(r["reference"] - r["drive"]) <= NEAR_DB]
+    if near:
+        say(f"  within 3 dB of the edge ({len(near)}): at most {-min(r['error'] for r in near):.3f} dB conservative")
+    for side, rs in (
+        ("inside", [r for r in finite if r["inside"]]),
+        ("outside", [r for r in finite if not r["inside"]]),
+    ):
+        if rs:
+            e = np.array([r["error"] for r in rs])
+            say(f"  {side} ({len(rs)}): max {e.max():+.5f} dB, min {e.min():+.4f} dB")
+    for r in sorted(finite, key=lambda r: r["error"])[:5]:
+        say(
+            f"    most conservative: {r['family']}/{r['name']} at {r['drive']:.1f} dB: "
+            f"report {r['estimate']:.3f}, full renders {r['reference']:.3f} dB",
+        )
+
+
+def analyze(args: argparse.Namespace) -> None:
+    """Report the comparison: where the status never changes, how close the edges are, and the dense scans."""
     rows = load(args.csv)
     finite = [r for r in rows if not math.isnan(r["error"]) and math.isfinite(r["reference"])]
     infinite = [r for r in rows if not math.isfinite(r["reference"])]
     silent, cautious, wrong = split_infinite(infinite)
-    print(f"{args.csv}: {len(rows)} fixtures, {sum(r['renders'] for r in rows)} full renders")
-    print(
+    say(f"{args.csv}: {len(rows)} fixtures, {sum(r['renders'] for r in rows)} full renders")
+    say(
         f"  no change of status within 0–48 dB: {len(infinite)}; the report agrees on "
         f"{len(infinite) - len(silent) - len(cautious) - len(wrong)}, reports nothing for {len(silent)} silent ones, "
-        f"is cautious on {len(cautious)} and wrong on {len(wrong)}"
+        f"is cautious on {len(cautious)} and wrong on {len(wrong)}",
     )
     for r in cautious + wrong:
-        print(
+        say(
             f"    {'cautious' if r in cautious else 'WRONG'}: {r['family']}/{r['name']} at {r['drive']:.1f} dB: "
-            f"report {r['estimate']:.3f} dB, full renders {r['reference']}"
+            f"report {r['estimate']:.3f} dB, full renders {r['reference']}",
         )
     if finite:
-        errors = np.array([r["error"] for r in finite])
-        print(
-            f"  an edge within 0–48 dB: {len(finite)}; error of the report (+ is optimistic): "
-            f"max {errors.max():+.5f} dB, min {errors.min():+.4f} dB, median {np.median(errors):+.5f} dB"
-        )
-        print(f"    exact to 0.001 dB: {int(np.sum(np.abs(errors) < 0.001))}")
-        for lo, hi in ((0.001, 0.1), (0.1, 0.5), (0.5, 1.0), (1.0, math.inf)):
-            n = sum(1 for e in errors if lo <= -e < hi)
-            print(f"    conservative by {lo:g}–{hi:g} dB: {n}")
-        near = [r for r in finite if abs(r["reference"] - r["drive"]) <= 3.0]
-        if near:
-            print(
-                f"  within 3 dB of the edge ({len(near)}): at most {-min(r['error'] for r in near):.3f} dB conservative"
-            )
-        for side, rs in (
-            ("inside", [r for r in finite if r["inside"]]),
-            ("outside", [r for r in finite if not r["inside"]]),
-        ):
-            if rs:
-                e = np.array([r["error"] for r in rs])
-                print(f"  {side} ({len(rs)}): max {e.max():+.5f} dB, min {e.min():+.4f} dB")
-        for r in sorted(finite, key=lambda r: r["error"])[:5]:
-            print(
-                f"    most conservative: {r['family']}/{r['name']} at {r['drive']:.1f} dB: "
-                f"report {r['estimate']:.3f}, full renders {r['reference']:.3f} dB"
-            )
+        _finite(finite)
     dense = [r for r in rows if not math.isnan(r["dense"])]
     if dense:
         missed = [r for r in dense if abs(r["dense"] - r["reference"]) > DENSE_STEP_DB + 1e-9]
-        print(f"  dense 0.05 dB scans: {len(dense)}; a change of status before the edge in {len(missed)}")
+        say(f"  dense 0.05 dB scans: {len(dense)}; a change of status before the edge in {len(missed)}")
         for r in missed:
-            print(f"    {r['family']}/{r['name']}: dense {r['dense']:.2f} dB, edge {r['reference']:.3f} dB")
+            say(f"    {r['family']}/{r['name']}: dense {r['dense']:.2f} dB, edge {r['reference']:.3f} dB")
 
 
-def main(argv=None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the headroom tool."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")

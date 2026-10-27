@@ -3,67 +3,56 @@
 
 """Performance check (plan §3, §8.1): render time and memory on this machine.
 
-Each case runs in a fresh interpreter after numpy, scipy and halyard_synth are
-imported, so memory is measured above that baseline. A render with a new
-seed computes its noise tables, as every take does; a repeated render finds
-them cached, as audition's re-renders do. Both are reported, and the budget
-applies to the first.
+Each case runs in a fresh interpreter, a spawned process, after numpy, scipy
+and halyard_synth are imported and a first render has paid the libraries'
+first-use costs, so memory is measured above that baseline. A render with a
+new seed computes its noise tables, as every take does; a repeated render
+finds them cached, as audition's re-renders do. Both are reported, and the
+budget applies to the first.
 
     uv run python -m tools.bench
 """
 
 from __future__ import annotations
 
-import json
+import dataclasses
+import multiprocessing
 import platform
-from pathlib import Path
-import subprocess
+import resource
 import sys
+import time
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+from typing import TYPE_CHECKING, NamedTuple
 
-HIT = r"""
-import dataclasses, json, resource, time
-from halyard_synth import cli
-from halyard_synth.patch import loads, stretch
-from halyard_synth.render import decimator, render
-p = loads(cli.reference_text("fat").replace("sample_rate = 48000", "sample_rate = %(rate)d"))
-p = stretch(p, "all", %(ms)f / p.length_ms, after_ms=0.0) if %(ms)f else p
-if %(long)d:
-    body = dataclasses.replace(p.body, amp=((0.0, 0.0), (0.5, 1.0), (100.0, 0.6), (800.0, 0.15), (2000.0, 0.0)))
-    wires = dataclasses.replace(p.noise[2], amp=((0.0, 0.0), (3.0, 1.0), (100.0, 0.5), (500.0, 0.12), (1000.0, 0.0)))
-    p = dataclasses.replace(p, body=body, noise=(p.noise[0], p.noise[1], wires))
-decimator(%(base)d)  # loading the shipped coefficients is not part of a render
-render(dataclasses.replace(p, seed=999))  # first-use costs of the libraries, not of this render
-base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-fresh, cached = 1e9, 1e9
-for seed in range(1, 1 + %(repeat)d):
-    q = dataclasses.replace(p, seed=seed)
-    t0 = time.perf_counter(); audio, report = render(q); fresh = min(fresh, time.perf_counter() - t0)
-    t0 = time.perf_counter(); render(q); cached = min(cached, time.perf_counter() - t0)
-peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-print(json.dumps({"fresh": fresh, "cached": cached, "mib": (peak - base) / 1024, "ms": p.length_ms,
-                  "layers": len(p.noise)}))
-"""
+import numpy as np
+import scipy
 
-PACK = r"""
-import json, resource, time
 from halyard_synth import cli
-from halyard_synth.patch import loads, softer
 from halyard_synth.pack import Options, build
-from halyard_synth.render import decimator
-p = loads(cli.reference_text("crack"))
-decimator(48000)
-base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-t0 = time.perf_counter()
-pk = build([(f"v{db}", softer(p, db)) for db in (0, 8, 16, 24)], Options(8))
-seconds = time.perf_counter() - t0
-peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-print(json.dumps({"seconds": seconds, "mib": (peak - base) / 1024, "files": sum(len(r) for r in pk.audio)}))
-"""
+from halyard_synth.patch import loads, softer, stretch
+from halyard_synth.render import decimator, render
+from tools import say
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 HIT_S, LONG_S, PACK_S, MEMORY_MIB = 0.3, 1.5, 15.0, 300
+RATES = (44100, 48000, 88200, 96000)
+REPEAT = 3  # seeds per case; the fastest counts
+KIB = 1024  # ru_maxrss is in KiB on Linux
+
+
+class Case(NamedTuple):
+    """One hit to time: its export rate, its length (0 keeps the reference's) and whether it rings long."""
+
+    rate: int
+    ms: float
+    long: bool
 
 
 def cpu() -> str:
+    """Name this machine's processor."""
     try:
         for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
             if line.startswith("model name"):
@@ -73,37 +62,76 @@ def cpu() -> str:
     return platform.processor() or platform.machine()
 
 
-def run(code: str) -> dict:
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
-    return json.loads(out.strip().splitlines()[-1])
+def _memory() -> int:
+    """Return this process's peak resident memory, in KiB."""
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+
+
+def hit(case: Case) -> dict[str, float]:
+    """Time a new seed's render and a repeated one of the fat reference, and its memory above the baseline."""
+    p = loads(cli.reference_text("fat").replace("sample_rate = 48000", f"sample_rate = {case.rate}"))
+    if case.ms:
+        p = stretch(p, "all", case.ms / p.length_ms, after_ms=0.0)
+    if case.long:
+        body = dataclasses.replace(p.body, amp=((0.0, 0.0), (0.5, 1.0), (100.0, 0.6), (800.0, 0.15), (2000.0, 0.0)))
+        wires_amp = ((0.0, 0.0), (3.0, 1.0), (100.0, 0.5), (500.0, 0.12), (1000.0, 0.0))
+        wires = dataclasses.replace(p.noise[2], amp=wires_amp)
+        p = dataclasses.replace(p, body=body, noise=(p.noise[0], p.noise[1], wires))
+    decimator(44100 if case.rate in {44100, 88200} else 48000)  # loading the shipped coefficients is not a render
+    render(dataclasses.replace(p, seed=999))  # first-use costs of the libraries, not of this render
+    base = _memory()
+    fresh, cached = float("inf"), float("inf")
+    for seed in range(1, 1 + REPEAT):
+        q = dataclasses.replace(p, seed=seed)
+        t0 = time.perf_counter()
+        render(q)
+        fresh = min(fresh, time.perf_counter() - t0)
+        t0 = time.perf_counter()
+        render(q)
+        cached = min(cached, time.perf_counter() - t0)
+    return {"fresh": fresh, "cached": cached, "mib": (_memory() - base) / KIB, "ms": p.length_ms}
+
+
+def pack(_: None = None) -> dict[str, float]:
+    """Time a pack of four layers of the crack reference, eight takes each, and its memory."""
+    p = loads(cli.reference_text("crack"))
+    decimator(48000)
+    base = _memory()
+    t0 = time.perf_counter()
+    pk = build([(f"v{db}", softer(p, db)) for db in (0, 8, 16, 24)], Options(8))
+    seconds = time.perf_counter() - t0
+    return {"seconds": seconds, "mib": (_memory() - base) / KIB, "files": sum(len(r) for r in pk.audio)}
+
+
+def fresh[T, R](work: Callable[[T], R], arg: T) -> R:
+    """Run work(arg) in a newly spawned interpreter."""
+    with ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn")) as pool:
+        return pool.submit(work, arg).result()
 
 
 def main() -> int:
-    import numpy
-    import scipy
-
-    print(f"machine: {cpu()}, Python {platform.python_version()}, NumPy {numpy.__version__}, SciPy {scipy.__version__}")
-    print(f"{'sound':<28s} {'rate':>6s} {'new seed':>9s} {'cached':>8s} {'limit':>7s} {'memory':>8s}")
+    """Time every case, and return 1 if any is over its budget."""
+    say(f"machine: {cpu()}, Python {platform.python_version()}, NumPy {np.__version__}, SciPy {scipy.__version__}")
+    say(f"{'sound':<28s} {'rate':>6s} {'new seed':>9s} {'cached':>8s} {'limit':>7s} {'memory':>8s}")
     ok = True
     for label, ms, long, limit in (
-        ("0.5 s hit, three layers", 500.0, 0, HIT_S),
-        ("2 s body, 1 s of noise", 0.0, 1, LONG_S),
+        ("0.5 s hit, three layers", 500.0, False, HIT_S),
+        ("2 s body, 1 s of noise", 0.0, True, LONG_S),
     ):
-        for rate in (44100, 48000, 88200, 96000):
-            base = 44100 if rate in (44100, 88200) else 48000
-            r = run(HIT % {"rate": rate, "ms": ms, "long": long, "base": base, "repeat": 3})
+        for rate in RATES:
+            r = fresh(hit, Case(rate, ms, long))
             fine = r["fresh"] <= limit and r["mib"] <= MEMORY_MIB
             ok &= fine
-            print(
+            say(
                 f"{label:<28s} {rate:6d} {1000 * r['fresh']:7.0f}ms {1000 * r['cached']:6.0f}ms {1000 * limit:5.0f}ms "
-                f"{r['mib']:5.0f}MiB {'' if fine else 'OVER BUDGET'}"
+                f"{r['mib']:5.0f}MiB {'' if fine else 'OVER BUDGET'}",
             )
-    r = run(PACK)
+    r = fresh(pack, None)
     fine = r["seconds"] <= PACK_S and r["mib"] <= MEMORY_MIB
     ok &= fine
-    print(
+    say(
         f"{'pack: 4 layers × 8 takes':<28s} {48000:6d} {r['seconds']:8.1f}s {'':>8s} {PACK_S:6.0f}s "
-        f"{r['mib']:5.0f}MiB {'' if fine else 'OVER BUDGET'}  ({r['files']} files)"
+        f"{r['mib']:5.0f}MiB {'' if fine else 'OVER BUDGET'}  ({r['files']:.0f} files)",
     )
     return 0 if ok else 1
 
