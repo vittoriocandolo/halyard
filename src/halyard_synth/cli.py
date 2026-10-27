@@ -16,7 +16,7 @@ from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import wav
+from . import __version__, wav
 from .audition import Settings, audition
 from .pack import Options, pack
 from .patch import Patch, PatchError, Train, bursts, dumps, load, loads, softer, stretch, tune
@@ -319,6 +319,7 @@ def _play_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line, and return the exit status."""
     ap = argparse.ArgumentParser(prog="halyard", description="A one-voice snare and clap synthesizer.")
+    ap.add_argument("--version", action="version", version=f"halyard {__version__}")
     sub = ap.add_subparsers(dest="command", required=True)
     _render_commands(sub)
     _edit_commands(sub)

@@ -7,6 +7,7 @@ import dataclasses
 import io
 import runpy
 import sys
+from importlib.metadata import version
 from pathlib import Path
 from typing import override
 
@@ -309,6 +310,14 @@ def test_a_reader_that_goes_away_ends_the_command_quietly(monkeypatch: pytest.Mo
     monkeypatch.setattr(sys, "stderr", errors)
     assert cli.main(["init", "crack"]) == 0
     assert errors.closed
+
+
+def test_the_command_says_its_version(capsys: pytest.CaptureFixture[str]) -> None:
+    """Say the version, as the package declares it."""
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--version"])
+    assert e.value.code == 0
+    assert capsys.readouterr().out == f"halyard {version('halyard-synth')}\n"
 
 
 def test_the_package_runs_as_the_command(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
