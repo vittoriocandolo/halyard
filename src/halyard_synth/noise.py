@@ -156,6 +156,18 @@ def tables(seed: int, bands: Iterable[tuple[float, float]], rate: int) -> list[F
         return [_CACHE[k] for k in keys]
 
 
+def cached() -> list[tuple[int, float, float, int]]:
+    """Return the cached tables' keys, (seed, low, high, rate), the least recently used first."""
+    with _LOCK:
+        return list(_CACHE)
+
+
+def clear_cache() -> None:
+    """Forget every cached table."""
+    with _LOCK:
+        _CACHE.clear()
+
+
 def interpolate(table_: Floats, rate: int, t: ArrayLike) -> tuple[Floats, Floats]:
     """Return n(t) and n′(t) at arbitrary times, by the cubic through the four nearest table samples.
 
