@@ -41,7 +41,7 @@ def random_curves(seed, count):
             yield t, v, Curve.pchip(t, v, last=0.0)
 
 
-def test_slopes_match_scipy_pchip():
+def test_slopes_match_scipy_pchip() -> None:
     rng = np.random.default_rng(1)
     for _ in range(2000):
         t, v = random_knots(rng)
@@ -51,7 +51,7 @@ def test_slopes_match_scipy_pchip():
         np.testing.assert_allclose(ours, theirs, rtol=1e-12, atol=1e-12 * scale)
 
 
-def test_evaluation_matches_independent_hermite():
+def test_evaluation_matches_independent_hermite() -> None:
     for t, v, c in random_curves(2, 500):
         x = np.linspace(t[0], t[-1], 997)
         ref = CubicHermiteSpline(t, v, c.d)(x)
@@ -59,7 +59,7 @@ def test_evaluation_matches_independent_hermite():
         assert np.array_equal(c(t), v)  # knots are reproduced exactly
 
 
-def test_sliced_evaluation_is_the_same_curve():
+def test_sliced_evaluation_is_the_same_curve() -> None:
     # Synthesis evaluates segment by segment on sorted times; it must give the very same values.
     rng = np.random.default_rng(14)
     for t, v, c in random_curves(15, 400):
@@ -75,14 +75,14 @@ def test_sliced_evaluation_is_the_same_curve():
         assert np.array_equal(c.on(x[:0]), x[:0])
 
 
-def test_constant_outside_knots():
+def test_constant_outside_knots() -> None:
     for t, v, c in random_curves(3, 200):
         span = t[-1] - t[0]
         assert np.all(c(t[0] - span * np.array([1e-9, 0.5, 3])) == v[0])
         assert np.all(c(t[-1] + span * np.array([1e-9, 0.5, 3])) == v[-1])
 
 
-def test_segments_stay_in_their_knot_interval():
+def test_segments_stay_in_their_knot_interval() -> None:
     # Monotonicity is a property of the slopes, so check it with an independent
     # evaluator that does not clip, then check that clipping removes nothing else.
     worst = 0.0
@@ -95,11 +95,12 @@ def test_segments_stay_in_their_knot_interval():
             scale = max(abs(v[i]), abs(v[i + 1]), 1e-300)
             worst = max(worst, (lo - y.min()) / scale, (y.max() - hi) / scale)
             ours = c(x)
-            assert ours.min() >= lo and ours.max() <= hi
+            assert ours.min() >= lo
+            assert ours.max() <= hi
     assert worst <= 16 * np.finfo(float).eps  # the independent evaluator's own rounding
 
 
-def test_amplitude_shape_confined_to_unit_interval():
+def test_amplitude_shape_confined_to_unit_interval() -> None:
     rng = np.random.default_rng(5)
     for _ in range(300):
         n = int(rng.integers(3, 33))
@@ -108,12 +109,14 @@ def test_amplitude_shape_confined_to_unit_interval():
         v[0] = v[-1] = 0.0
         v[rng.integers(1, n - 1)] = 1.0
         c = amplitude_curve(t, v)
-        assert c.d[0] == 0.0 and c.d[-1] == 0.0
+        assert c.d[0] == 0.0
+        assert c.d[-1] == 0.0
         y = c.on(np.linspace(t[0] - 0.01, t[-1] + 0.01, 20001))
-        assert y.min() >= 0.0 and y.max() <= 1.0
+        assert y.min() >= 0.0
+        assert y.max() <= 1.0
 
 
-def test_pitch_extremes_only_at_knots():
+def test_pitch_extremes_only_at_knots() -> None:
     rng = np.random.default_rng(6)
     for _ in range(300):
         n = int(rng.integers(2, 33))
@@ -124,7 +127,8 @@ def test_pitch_extremes_only_at_knots():
         assert c.d[-1] == 0.0
         assert c.d[0] == pchip_slopes(t, r)[0]  # the first slope is kept
         y = c(np.linspace(0, t[-1] * 1.5, 20001))
-        assert y.max() <= r.max() and y.min() >= r.min()
+        assert y.max() <= r.max()
+        assert y.min() >= r.min()
 
 
 def _quad(c, a, b):
@@ -137,7 +141,7 @@ def _quad(c, a, b):
     return val if b >= a else -val
 
 
-def test_integrals_match_adaptive_quadrature():
+def test_integrals_match_adaptive_quadrature() -> None:
     rng = np.random.default_rng(7)
     for t, v, c in random_curves(8, 150):
         span = t[-1] - t[0]
@@ -148,7 +152,7 @@ def test_integrals_match_adaptive_quadrature():
             assert abs(c.remaining(x) - _quad(c, x, t[-1])) <= 1e-12 * scale
 
 
-def test_integral_derivative_is_the_curve():
+def test_integral_derivative_is_the_curve() -> None:
     # Within a segment the integral equals Simpson's rule on the curve, which is exact for cubics.
     rng = np.random.default_rng(10)
     for t, v, c in random_curves(11, 300):
@@ -169,11 +173,14 @@ def test_integral_derivative_is_the_curve():
         assert np.all(np.abs(got - simpson) <= tol)
         x = np.linspace(t[0], t[-1], 101)
         np.testing.assert_allclose(
-            c.integral(x) + c.remaining(x), c.total, rtol=1e-12, atol=1e-13 * abs(c.total) + 1e-300
+            c.integral(x) + c.remaining(x),
+            c.total,
+            rtol=1e-12,
+            atol=1e-13 * abs(c.total) + 1e-300,
         )
 
 
-def test_integral_grows_linearly_outside():
+def test_integral_grows_linearly_outside() -> None:
     c = pitch_curve([0.0, 0.01, 0.05], [8.0, 2.0, 1.0])
     for x in (0.05, 0.1, 1.0, 2.0):
         assert c.integral(x) == pytest.approx(c.total + (x - 0.05), rel=1e-15)
@@ -181,14 +188,14 @@ def test_integral_grows_linearly_outside():
     assert c.integral(-0.5) == pytest.approx(-4.0)
 
 
-def test_rejects_bad_knots():
+def test_rejects_bad_knots() -> None:
     with pytest.raises(ValueError):
         Curve([0.0, 0.0], [1.0, 2.0], [0.0, 0.0])
     with pytest.raises(ValueError):
         Curve([0.0], [1.0], [0.0])
 
 
-def test_derivatives_match_independent_hermite():
+def test_derivatives_match_independent_hermite() -> None:
     for t, v, c in random_curves(12, 300):
         spline = CubicHermiteSpline(t, c.v, c.d)
         x = np.linspace(t[0], t[-1], 499)[:-1]
@@ -201,7 +208,7 @@ def test_derivatives_match_independent_hermite():
         assert np.all(c.second(np.array([t[0] - 1.0, t[-1], t[-1] + 1.0])) == 0)
 
 
-def test_jumps_are_the_one_sided_derivative_differences():
+def test_jumps_are_the_one_sided_derivative_differences() -> None:
     for t, v, c in random_curves(13, 300):
         spline = CubicHermiteSpline(t, c.v, c.d)
         d2, d3 = spline.derivative(2), spline.derivative(3)
@@ -222,8 +229,8 @@ def test_jumps_are_the_one_sided_derivative_differences():
             )
 
 
-@pytest.mark.parametrize("spacing_db, within_db", [(6, 0.03), (10, 0.15), (20, 1.3)])
-def test_points_every_few_db_reproduce_an_exponential_tail(spacing_db, within_db):
+@pytest.mark.parametrize(("spacing_db", "within_db"), [(6, 0.03), (10, 0.15), (20, 1.3)])
+def test_points_every_few_db_reproduce_an_exponential_tail(spacing_db, within_db) -> None:
     # Plan §2.2 authoring guidance, on the interior of a tail.
     tau = 0.1
     step = spacing_db * math.log(10) / 20 * tau
@@ -237,8 +244,8 @@ def test_points_every_few_db_reproduce_an_exponential_tail(spacing_db, within_db
     assert round(float(np.max(np.abs(deviation))), 2 if spacing_db < 20 else 1) <= within_db
 
 
-@pytest.mark.parametrize("spacing_db, above_db", [(6, 1.1), (10, 2.0), (20, 5.1)])
-def test_the_first_segment_after_a_peak_is_rounder(spacing_db, above_db):
+@pytest.mark.parametrize(("spacing_db", "above_db"), [(6, 1.1), (10, 2.0), (20, 5.1)])
+def test_the_first_segment_after_a_peak_is_rounder(spacing_db, above_db) -> None:
     # The peak's slope is zero, so the decay starts flat (plan §2.2): a crack needs a shoulder knot.
     tau = 0.1
     step = spacing_db * math.log(10) / 20 * tau
@@ -271,8 +278,8 @@ def random_shape(rng, span=2.0):
     return amplitude_curve(t, v)
 
 
-@pytest.mark.parametrize("span, s_max", [(0.3, 20.0), (2.0, 512.0)])
-def test_compressed_decay_is_the_shape_at_compressed_time(span, s_max):
+@pytest.mark.parametrize(("span", "s_max"), [(0.3, 20.0), (2.0, 512.0)])
+def test_compressed_decay_is_the_shape_at_compressed_time(span, s_max) -> None:
     rng = np.random.default_rng(5)
     for _ in range(200):
         e = random_shape(rng, span)
@@ -289,14 +296,17 @@ def test_compressed_decay_is_the_shape_at_compressed_time(span, s_max):
         np.testing.assert_allclose(c.on(x), c(x), rtol=0, atol=0)
 
 
-def test_compressed_shapes_keep_their_peak_and_monotone_segments():
+def test_compressed_shapes_keep_their_peak_and_monotone_segments() -> None:
     rng = np.random.default_rng(6)
     for _ in range(300):
         e = random_shape(rng)
         c = compressed(e, 8 ** rng.uniform(0, 3))
         k = peak_index(c)
-        assert k == peak_index(e) and c.v[k] == 1.0 and c(c.t[k]) == 1.0
-        assert np.all(np.diff(c.t) > 0) and c.t[-1] <= e.t[-1]
+        assert k == peak_index(e)
+        assert c.v[k] == 1.0
+        assert c(c.t[k]) == 1.0
+        assert np.all(np.diff(c.t) > 0)
+        assert c.t[-1] <= e.t[-1]
         for i in range(c.t.size - 1):
             x = np.linspace(c.t[i], c.t[i + 1], 101)
             y = c(x)
@@ -304,7 +314,7 @@ def test_compressed_shapes_keep_their_peak_and_monotone_segments():
             assert np.all((y >= 0) & (y <= 1))
 
 
-def test_compressed_jumps_scale_by_s_squared_and_cubed():
+def test_compressed_jumps_scale_by_s_squared_and_cubed() -> None:
     rng = np.random.default_rng(7)
     for _ in range(200):
         e = random_shape(rng, span=0.3)
@@ -323,12 +333,12 @@ def test_compressed_jumps_scale_by_s_squared_and_cubed():
             np.testing.assert_allclose(got[2:], (b3, a3), rtol=1e-7, atol=1e-9 * scale / np.min(c.h))
 
 
-def test_compression_by_one_is_the_shape_itself():
+def test_compression_by_one_is_the_shape_itself() -> None:
     e = amplitude_curve([0.0, 0.0004, 0.025, 0.18], [0.0, 1.0, 0.45, 0.0])
     assert compressed(e, 1.0) is e
 
 
-def test_compression_needs_a_flat_peak():
+def test_compression_needs_a_flat_peak() -> None:
     bent = Curve([0.0, 0.001, 0.01], [0.0, 1.0, 0.0], [0.0, 5.0, 0.0])
     with pytest.raises(ValueError):
         compressed(bent, 2.0)

@@ -8,8 +8,7 @@ import numpy as np
 import pytest
 from scipy.optimize import least_squares
 
-from halyard_synth import noise
-from halyard_synth import voice as V
+from halyard_synth import noise, voice
 from halyard_synth.curve import amplitude_curve, compressed, pitch_curve
 from halyard_synth.patch import loads
 
@@ -54,41 +53,50 @@ def x_exact(p, t):
 
 
 def x_internal(p, rate, n0, n1):
-    v = V.voice(p)
-    return V.sources(v, rate, n0, n1, V.tables(v, rate))
+    v = voice.voice(p)
+    return voice.sources(v, rate, n0, n1, voice.tables(v, rate))
 
 
 # The saturator.
 
 
-def test_drive_identities():
-    assert V.drive_alpha(0.0) == 0.0
+def test_drive_identities() -> None:
+    assert voice.drive_alpha(0.0) == 0.0
     for db in (0.5, 6.0, 18.0, 48.0):
-        a = V.drive_alpha(db)
+        a = voice.drive_alpha(db)
         assert a / math.tanh(a) == pytest.approx(10 ** (db / 20), rel=1e-14)
         x = np.linspace(-3, 3, 10001)
-        y = V.saturate(a, x)
-        assert V.saturate(a, np.array([1.0]))[0] == 1.0 and V.saturate(a, np.array([-1.0]))[0] == -1.0
-        assert np.array_equal(V.saturate(a, -x), -y)
+        y = voice.saturate(a, x)
+        assert voice.saturate(a, np.array([1.0]))[0] == 1.0
+        assert voice.saturate(a, np.array([-1.0]))[0] == -1.0
+        assert np.array_equal(voice.saturate(a, -x), -y)
         # The small-signal gain is the drive.
-        assert V.saturate(a, np.array([1e-9]))[0] / 1e-9 == pytest.approx(10 ** (db / 20), rel=1e-6)
-        assert np.all(np.diff(y) >= 0) and np.all(np.abs(y) <= 1 / math.tanh(a) * (1 + 1e-15))
+        assert voice.saturate(a, np.array([1e-9]))[0] / 1e-9 == pytest.approx(10 ** (db / 20), rel=1e-6)
+        assert np.all(np.diff(y) >= 0)
+        assert np.all(np.abs(y) <= 1 / math.tanh(a) * (1 + 1e-15))
     x = np.linspace(-2, 2, 101)
-    assert np.array_equal(V.saturate(0.0, x), x)
+    assert np.array_equal(voice.saturate(0.0, x), x)
 
 
-def test_slope_and_curvature_are_the_derivatives():
+def test_slope_and_curvature_are_the_derivatives() -> None:
     for db in (3.0, 24.0):
-        a = V.drive_alpha(db)
+        a = voice.drive_alpha(db)
         x = np.linspace(-1.5, 1.5, 301)
         h = 1e-6
         np.testing.assert_allclose(
-            V.slope(a, x), (V.saturate(a, x + h) - V.saturate(a, x - h)) / (2 * h), rtol=1e-7, atol=1e-7
+            voice.slope(a, x),
+            (voice.saturate(a, x + h) - voice.saturate(a, x - h)) / (2 * h),
+            rtol=1e-7,
+            atol=1e-7,
         )
         np.testing.assert_allclose(
-            V.curvature(a, x), (V.slope(a, x + h) - V.slope(a, x - h)) / (2 * h), rtol=1e-6, atol=1e-5
+            voice.curvature(a, x),
+            (voice.slope(a, x + h) - voice.slope(a, x - h)) / (2 * h),
+            rtol=1e-6,
+            atol=1e-5,
         )
-    assert np.all(V.slope(0.0, x) == 1.0) and np.all(V.curvature(0.0, x) == 0.0)
+    assert np.all(voice.slope(0.0, x) == 1.0)
+    assert np.all(voice.curvature(0.0, x) == 0.0)
 
 
 # The model.
@@ -108,35 +116,35 @@ def test_slope_and_curvature_are_the_derivatives():
         {"noise[1].level_db": -math.inf, "seed": 2**63 - 1},
     ],
 )
-def test_sources_are_the_model(edits):
+def test_sources_are_the_model(edits) -> None:
     p = make(**edits)
     rng = np.random.default_rng(1)
     n = np.unique(np.concatenate(([0, 1, 77], rng.integers(0, int(0.27 * RATE), 300))))
-    v = V.voice(p)
-    tabs = V.tables(v, RATE)
-    got = np.concatenate([V.sources(v, RATE, int(k), int(k) + 1, tabs) for k in n])
+    v = voice.voice(p)
+    tabs = voice.tables(v, RATE)
+    got = np.concatenate([voice.sources(v, RATE, int(k), int(k) + 1, tabs) for k in n])
     np.testing.assert_allclose(got, x_exact(p, n / RATE), rtol=0, atol=1e-12)
 
 
-def test_blocks_and_longer_renders_never_change_samples():
+def test_blocks_and_longer_renders_never_change_samples() -> None:
     p = make(**{"noise[2].rattle": 0.7})
-    v = V.voice(p)
-    tabs = V.tables(v, RATE)
-    whole = V.sources(v, RATE, 0, 200000, tabs)
+    v = voice.voice(p)
+    tabs = voice.tables(v, RATE)
+    whole = voice.sources(v, RATE, 0, 200000, tabs)
     for a, b in ((0, 1), (65535, 65537), (123456, 200000), (199999, 200000)):
-        assert np.array_equal(V.sources(v, RATE, a, b, tabs), whole[a:b])
-    y1, _ = V.internal(v, RATE, 150000, tabs)
-    y2, _ = V.internal(v, RATE, 300000, tabs)
+        assert np.array_equal(voice.sources(v, RATE, a, b, tabs), whole[a:b])
+    y1, _ = voice.internal(v, RATE, 150000, tabs)
+    y2, _ = voice.internal(v, RATE, 300000, tabs)
     assert np.array_equal(y1, y2[:150000])
 
 
-def test_every_hit_starts_at_exactly_zero():
+def test_every_hit_starts_at_exactly_zero() -> None:
     for edits in ({}, {"drive.db": 30.0}, {"noise[1].amp": amp((0, 0), (0.02, 1), (5, 0))}):
-        v = V.voice(make(**edits))
-        assert V.sources(v, RATE, 0, 1, V.tables(v, RATE))[0] == 0.0
+        v = voice.voice(make(**edits))
+        assert voice.sources(v, RATE, 0, 1, voice.tables(v, RATE))[0] == 0.0
 
 
-def test_identical_layers_sum_coherently():
+def test_identical_layers_sum_coherently() -> None:
     # Two identical layers at equal level make +6 dB, not +3 dB: they are the same noise.
     p = make(**{"body.level_db": -math.inf})
     one = dataclasses.replace(p, noise=(p.noise[1],))
@@ -145,7 +153,7 @@ def test_identical_layers_sum_coherently():
     np.testing.assert_allclose(x2, 2 * x1, rtol=1e-15, atol=0)
 
 
-def test_editing_the_body_keeps_the_noise_and_changes_the_rattle():
+def test_editing_the_body_keeps_the_noise_and_changes_the_rattle() -> None:
     base = {"body.tune_hz": 185.0}
     moved = {"body.tune_hz": 230.0, "body.modes": modes((1, 0), (1.7, -3)), "body.damping": 2.0}
     silent_body = {"body.level_db": -math.inf}
@@ -157,7 +165,7 @@ def test_editing_the_body_keeps_the_noise_and_changes_the_rattle():
     assert not np.array_equal(layers({**base, "noise[2].rattle": 0.5}), layers({**moved, "noise[2].rattle": 0.5}))
 
 
-def test_a_silent_body_gates_the_rattle_like_a_sounding_one():
+def test_a_silent_body_gates_the_rattle_like_a_sounding_one() -> None:
     loud, quiet = (
         make(**{"noise[1].level_db": -math.inf}),
         make(**{"noise[1].level_db": -math.inf, "body.level_db": -math.inf}),
@@ -171,12 +179,12 @@ def test_a_silent_body_gates_the_rattle_like_a_sounding_one():
     )
 
 
-def test_source_length_and_sample_count():
-    v = V.voice(make())
+def test_source_length_and_sample_count() -> None:
+    v = voice.voice(make())
     assert v.t_src == 0.26
-    assert V.sample_count(0.26, RATE) == 399361
+    assert voice.sample_count(0.26, RATE) == 399361
     for t, rate in ((0.26, 1411200), (1e-5, 1536000), (0.0, 1536000), (2.0, 3072000)):
-        n = V.sample_count(t, rate)
+        n = voice.sample_count(t, rate)
         assert (n - 1) / rate <= t < n / rate
 
 
@@ -195,7 +203,7 @@ def fit_frequencies(t, x, guesses):
 
 
 @pytest.mark.parametrize("tune", [40.0, 185.0, 1000.0, 4000.0])
-def test_every_mode_sounds_at_its_ratio_of_the_tuning(tune):
+def test_every_mode_sounds_at_its_ratio_of_the_tuning(tune) -> None:
     ratios = (1.0, 1.593, 2.136, 2.295)
     p = make(
         **silent_layers(
@@ -205,8 +213,8 @@ def test_every_mode_sounds_at_its_ratio_of_the_tuning(tune):
                 "body.modes": modes(*[(r, -3.0 * i) for i, r in enumerate(ratios)]),
                 "body.pitch": pitch((0, 1.08), (15, 1)),
                 "body.amp": amp((0, 0), (1, 1), (1990, 1), (2000, 0)),
-            }
-        )
+            },
+        ),
     )
     rate = 48000
     n0, n1 = int(0.1 * rate), int(1.9 * rate)
@@ -232,8 +240,8 @@ def mode_amplitudes(t, x, freqs, centres, half):
     return np.array(out)
 
 
-@pytest.mark.parametrize("ratio, beta", [(1.593, 0.5), (1.593, 1.0), (2.136, 2.0), (2.295, 3.0), (4.0, 1.0)])
-def test_damping_scales_decay_rates_by_ratio_to_the_beta(ratio, beta):
+@pytest.mark.parametrize(("ratio", "beta"), [(1.593, 0.5), (1.593, 1.0), (2.136, 2.0), (2.295, 3.0), (4.0, 1.0)])
+def test_damping_scales_decay_rates_by_ratio_to_the_beta(ratio, beta) -> None:
     # An exponential body shape, knots every 6 dB; flat pitch, so the phases are known exactly.
     s = ratio**beta
     spacing = 5.0 * s  # the faster mode still decays 6 dB per 5 ms
@@ -247,8 +255,8 @@ def test_damping_scales_decay_rates_by_ratio_to_the_beta(ratio, beta):
                 "body.modes": modes((1, 0), (ratio, 0)),
                 "body.pitch": pitch((0, 1), (15, 1)),
                 "body.amp": amp(*knots),
-            }
-        )
+            },
+        ),
     )
     rate = 48000
     x = x_internal(p, rate, 0, int(knots[-1][0] / 1000 * rate))
@@ -263,11 +271,12 @@ def test_damping_scales_decay_rates_by_ratio_to_the_beta(ratio, beta):
     assert rates[1] / rates[0] == pytest.approx(s, rel=1e-3)
 
 
-def test_modes_share_the_peak_and_the_fundamental_lasts_longest():
-    v = V.voice(make(**{"body.damping": 2.0}))
+def test_modes_share_the_peak_and_the_fundamental_lasts_longest() -> None:
+    v = voice.voice(make(**{"body.damping": 2.0}))
     tpk = v.body_amp.t[1]
     for m in v.modes:
-        assert m.env.t[1] == tpk and m.env.v[1] == 1.0
+        assert m.env.t[1] == tpk
+        assert m.env.v[1] == 1.0
         assert m.env.t[-1] <= v.body_amp.t[-1]
     assert v.modes[0].env is v.body_amp
 
@@ -286,17 +295,17 @@ def rattle_patch(depth, **edits):
             "body.level_db": -math.inf,
             "body.pitch": pitch((0, 1.08), (15, 1)),
             **edits,
-        }
+        },
     )
 
 
 @pytest.mark.parametrize("depth", [0.25, 0.5, 1.0])
-def test_rattle_modulates_at_the_fundamental_with_its_depth(depth):
+def test_rattle_modulates_at_the_fundamental_with_its_depth(depth) -> None:
     p = rattle_patch(depth)
-    v = V.voice(p)
-    tabs = V.tables(v, RATE)
+    v = voice.voice(p)
+    tabs = voice.tables(v, RATE)
     n0, n1 = int(0.002 * RATE), int(0.38 * RATE)
-    x = V.sources(v, RATE, n0, n1, tabs)
+    x = voice.sources(v, RATE, n0, n1, tabs)
     n = tabs[1][np.arange(n0, n1) % RATE]
     ok = np.abs(n) > 0.1
     t = np.arange(n0, n1)[ok] / RATE
@@ -309,12 +318,12 @@ def test_rattle_modulates_at_the_fundamental_with_its_depth(depth):
     assert abs(coef[2]) <= 1e-9
 
 
-def test_no_rattle_without_depth_or_body_shape():
+def test_no_rattle_without_depth_or_body_shape() -> None:
     for p in (rattle_patch(0.0), rattle_patch(0.8, **{"body.amp": amp((500, 0), (501, 1), (560, 0))})):
-        v = V.voice(p)
-        tabs = V.tables(v, RATE)
+        v = voice.voice(p)
+        tabs = voice.tables(v, RATE)
         n0, n1 = int(0.002 * RATE), int(0.45 * RATE)
-        x = V.sources(v, RATE, n0, n1, tabs)
+        x = voice.sources(v, RATE, n0, n1, tabs)
         np.testing.assert_array_equal(
             x,
             10 ** (p.noise[1].level_db / 20)
@@ -335,18 +344,20 @@ def brute_knee(x, alpha):
 
 
 @pytest.mark.parametrize("edits", [{}, {"noise[1].level_db": 12.0, "drive.db": 20.0}, {"body.level_db": 10.0}])
-def test_knee_record_is_exact_at_every_drive(edits):
-    v = V.voice(make(**edits))
-    count = V.sample_count(v.t_src, RATE)
-    tabs = V.tables(v, RATE)
-    _, slew = V.internal(v, RATE, count, tabs)
-    x = np.concatenate([V.sources(v, RATE, a, min(a + V.BLOCK, count), tabs) for a in range(0, count, V.BLOCK)])
+def test_knee_record_is_exact_at_every_drive(edits) -> None:
+    v = voice.voice(make(**edits))
+    count = voice.sample_count(v.t_src, RATE)
+    tabs = voice.tables(v, RATE)
+    _, slew = voice.internal(v, RATE, count, tabs)
+    x = np.concatenate(
+        [voice.sources(v, RATE, a, min(a + voice.BLOCK, count), tabs) for a in range(0, count, voice.BLOCK)]
+    )
     alphas = np.concatenate(
         [
-            [V.drive_alpha(db) for db in np.arange(0.5, 48.01, 0.5)],
+            [voice.drive_alpha(db) for db in np.arange(0.5, 48.01, 0.5)],
             slew.knees.drops(),
             np.nextafter(slew.knees.drops(), np.inf),
-        ]
+        ],
     )
     for a in alphas:
         assert slew.knee(a) == pytest.approx(brute_knee(x, a), rel=1e-15, abs=0)
@@ -357,8 +368,8 @@ def test_knee_record_is_exact_at_every_drive(edits):
     assert slew.peak == float(np.max(np.abs(np.diff(u))))
 
 
-def test_knees_never_count_a_step_again_once_it_stops():
-    k = V.Knees(0.1, np.array([0.2, 0.5]), np.array([0.3, 0.4]))
+def test_knees_never_count_a_step_again_once_it_stops() -> None:
+    k = voice.Knees(0.1, np.array([0.2, 0.5]), np.array([0.3, 0.4]))
     assert k.at(1.0) == pytest.approx(0.4)  # both steps reach below 1
     assert k.at(1 / 0.5) == pytest.approx(2 * 0.4)
     assert k.at(np.nextafter(2.0, 3.0)) == pytest.approx(2 * 0.3, rel=1e-12)  # the 0.4 step has left
@@ -389,10 +400,10 @@ KINKY = {
 }
 
 
-def test_every_jump_matches_the_model():
+def test_every_jump_matches_the_model() -> None:
     p = make(**KINKY)
-    v = V.voice(p)
-    k = V.kink_terms(v, RATE)
+    v = voice.voice(p)
+    k = voice.kink_terms(v, RATE)
     times = np.unique(k.t)
     for tau in times:
         rows = k.t == tau
@@ -410,54 +421,57 @@ def test_every_jump_matches_the_model():
         np.testing.assert_allclose(k.x[rows], x_exact(p, np.full(rows.sum(), tau)), rtol=0, atol=1e-5)
 
 
-def test_jumps_through_the_saturator():
+def test_jumps_through_the_saturator() -> None:
     # Deep in saturation y hardly moves, so the numerical derivatives meet rounding: 10⁻¹⁶ amplified by
     # the polynomial fit, over δ² and δ³. The jumps that matter are far above that floor.
     p = make(**KINKY, **{"drive.db": 18.0})
-    v = V.voice(p)
-    k = V.kink_terms(v, RATE)
+    v = voice.voice(p)
+    k = voice.kink_terms(v, RATE)
     a = v.alpha
     times = np.unique(k.t)
     for tau in times[1:]:
         rows = k.t == tau
         delta = min(1e-6, 0.25 * float(np.min(np.abs(times[times != tau] - tau))))
-        f = lambda t: V.saturate(a, x_exact(p, t))  # noqa: E731
+        f = lambda t: voice.saturate(a, x_exact(p, t))  # noqa: E731
         b2, b3 = one_sided(f, tau, delta, -1)
         a2, a3 = one_sided(f, tau, delta, +1)
-        g1, g2 = V.slope(a, k.x[rows]), V.curvature(a, k.x[rows])
+        g1, g2 = voice.slope(a, k.x[rows]), voice.curvature(a, k.x[rows])
         got2 = float(np.sum(g1 * k.d2[rows]))
         got3 = float(np.sum(g1 * k.d3[rows] + 3 * g2 * k.dx[rows] * k.d2[rows]))
         assert got2 == pytest.approx(a2 - b2, abs=5e-3 * max(abs(a2), abs(b2)) + 1e-10 / delta**2)
         assert got3 == pytest.approx(a3 - b3, abs=5e-3 * max(abs(a3), abs(b3)) + 1e-10 / delta**3)
 
 
-def test_kink_bound_form():
+def test_kink_bound_form() -> None:
     p = make(**KINKY, **{"drive.db": 12.0})
-    v = V.voice(p)
-    k = V.kink_terms(v, RATE)
-    total = V.kink_bound(k, v.alpha, RATE, 24000.0)
+    v = voice.voice(p)
+    k = voice.kink_terms(v, RATE)
+    total = voice.kink_bound(k, v.alpha, RATE, 24000.0)
     assert total > 0
-    assert sum(c for _, c in V.kink_knots(k, v.alpha, RATE, 24000.0)) == pytest.approx(total, rel=1e-12)
+    assert sum(c for _, c in voice.kink_knots(k, v.alpha, RATE, 24000.0)) == pytest.approx(total, rel=1e-12)
     alphas = np.array([0.0, 0.5, v.alpha, 30.0])
     np.testing.assert_allclose(
-        V.kink_bounds(k, alphas, RATE, 24000.0), [V.kink_bound(k, a, RATE, 24000.0) for a in alphas], rtol=1e-12
+        voice.kink_bounds(k, alphas, RATE, 24000.0),
+        [voice.kink_bound(k, a, RATE, 24000.0) for a in alphas],
+        rtol=1e-12,
     )
     # The weights: 4 ζ(n+1) · band / (2πF)^(n+1), with the 1% interpolation margin.
-    w2, w3 = V._weights(RATE, 24000.0)
+    w2, w3 = voice._weights(RATE, 24000.0)
     assert w2 == pytest.approx(1.01 * 4 * 1.2020569031595942 * 24000 / (2 * np.pi * RATE) ** 3, rel=1e-15)
     assert w3 == pytest.approx(1.01 * 4 * np.pi**4 / 90 * 24000 / (2 * np.pi * RATE) ** 4, rel=1e-15)
     # Paths name knots as the parser does, counting from 1.
-    paths = {path for path, _ in V.kink_knots(k, v.alpha, RATE, 24000.0)}
+    paths = {path for path, _ in voice.kink_knots(k, v.alpha, RATE, 24000.0)}
     assert {"body.amp[1]", "body.amp[5]", "body.pitch[2]", "noise[1].amp[5]", "noise[2].amp[4]"} <= paths
 
 
-def test_silence_has_no_kinks():
+def test_silence_has_no_kinks() -> None:
     p = make(**{"body.level_db": -math.inf, "noise[1].level_db": -math.inf, "noise[2].level_db": -math.inf})
-    k = V.kink_terms(V.voice(p), RATE)
-    assert k.t.size == 0 and V.kink_bound(k, 0.0, RATE, 24000.0) == 0.0
+    k = voice.kink_terms(voice.voice(p), RATE)
+    assert k.t.size == 0
+    assert voice.kink_bound(k, 0.0, RATE, 24000.0) == 0.0
 
 
-def test_example_patch_kinks_are_dominated_by_the_stick():
-    v = V.voice(loads(EXAMPLE))
-    top = V.kink_knots(V.kink_terms(v, RATE), v.alpha, RATE, 24000.0)[0][0]
+def test_example_patch_kinks_are_dominated_by_the_stick() -> None:
+    v = voice.voice(loads(EXAMPLE))
+    top = voice.kink_knots(voice.kink_terms(v, RATE), v.alpha, RATE, 24000.0)[0][0]
     assert top.startswith("noise[1].amp")

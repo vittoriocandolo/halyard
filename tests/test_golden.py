@@ -19,18 +19,21 @@ from halyard_synth.render import render_takes
 from tools.golden import TAKES
 
 GOLDEN = Path(__file__).parent / "golden"
+ROUNDING = 1e-6  # float32 output, rounded on another platform or library version
 
 
 @pytest.mark.parametrize("name", REFERENCES)
-def test_golden(name):
+def test_golden(name: str) -> None:
+    """Render each reference's two takes and find them as recorded, their patches and rates included."""
     p = loads(reference_text(name))
     audio, report = render_takes(p, TAKES)
-    for a, take in zip(audio, report.takes):
+    for a, take in zip(audio, report.takes, strict=True):
         golden = wav.read(GOLDEN / f"{name}_rr{take.number}.wav")
+        assert golden.meta is not None
         assert loads(golden.meta["patch"]).seed == take.seed
         assert loads(golden.meta["patch"]) == loads(
-            reference_text(name).replace(f"seed = {p.seed}", f"seed = {take.seed}", 1)
+            reference_text(name).replace(f"seed = {p.seed}", f"seed = {take.seed}", 1),
         )
         assert golden.rate == report.sample_rate
         assert a.size == golden.samples.size
-        assert np.max(np.abs(a - golden.samples)) <= 1e-6
+        assert np.max(np.abs(a - golden.samples)) <= ROUNDING

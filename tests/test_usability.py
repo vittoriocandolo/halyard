@@ -15,7 +15,7 @@ import math
 import numpy as np
 import pytest
 
-from halyard_synth import patch as P
+from halyard_synth import patch
 from halyard_synth.cli import reference_text
 from halyard_synth.render import render
 
@@ -26,16 +26,16 @@ SNARES = ("tone", "crack", "fat", "driven")
 
 
 def ref(name):
-    return P.loads(reference_text(name))
+    return patch.loads(reference_text(name))
 
 
 def edit(p, **fields):
     """Field edits by patch path, such as edit(p, **{"noise[2].level_db": -3.0}); the caller counts them."""
     assert len(fields) <= 3
-    d = P.to_dict(p)
+    d = patch.to_dict(p)
     for path, value in fields.items():
         set_path(d, path, value)
-    return P.from_dict(d)
+    return patch.from_dict(d)
 
 
 def audio(p):
@@ -114,7 +114,7 @@ def layer_index(p, fastest: bool) -> int:
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_change_the_tuning(name):
+def test_change_the_tuning(name) -> None:
     p = ref(name)
     up = round(p.body.tune_hz * 2 ** (2 / 12), 3)  # one field: a whole tone up
     before, after = body_hz(audio(p), p), body_hz(audio(edit(p, **{"body.tune_hz": up})), p)
@@ -123,14 +123,14 @@ def test_change_the_tuning(name):
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_shorten_the_tail(name):
+def test_shorten_the_tail(name) -> None:
     p = ref(name)
-    shorter = P.stretch(p, "all", 0.6)  # one command
+    shorter = patch.stretch(p, "all", 0.6)  # one command
     assert decay_ms(audio(shorter)) < 0.8 * decay_ms(audio(p))
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_add_crack(name):
+def test_add_crack(name) -> None:
     p = ref(name)
     j = layer_index(p, fastest=True)
     louder = edit(p, **{f"noise[{j}].level_db": p.noise[j - 1].level_db + 6})  # one field: the stick
@@ -140,7 +140,7 @@ def test_add_crack(name):
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_add_body(name):
+def test_add_body(name) -> None:
     p = ref(name)
     fuller = edit(p, **{"body.level_db": p.body.level_db + 4})  # one field
 
@@ -151,19 +151,20 @@ def test_add_body(name):
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_add_wires(name):
+def test_add_wires(name) -> None:
     p = ref(name)
     j = layer_index(p, fastest=False)
     layer = p.noise[j - 1]
     buzzier = edit(
-        p, **{f"noise[{j}].level_db": layer.level_db + 3, f"noise[{j}].rattle": min(1.0, layer.rattle + 0.3)}
+        p,
+        **{f"noise[{j}].level_db": layer.level_db + 3, f"noise[{j}].rattle": min(1.0, layer.rattle + 0.3)},
     )
     # More wire energy in the tail, 20 ms on, above the body's modes.
     assert band_energy(audio(buzzier), 2000, 12000, 20, 150) > 1.3 * band_energy(audio(p), 2000, 12000, 20, 150)
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_darken(name):
+def test_darken(name) -> None:
     p = ref(name)
     darker = edit(
         p,
@@ -182,7 +183,7 @@ def sustain_db(x):
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_add_aggression(name):
+def test_add_aggression(name) -> None:
     p = ref(name)
     rougher = edit(p, **{"drive.db": p.drive.db + 6, "output.db": p.output.db - 4})  # two fields
     # Denser: the drive lifts the tail against the onset, even where the peaks are already saturated.
@@ -190,9 +191,9 @@ def test_add_aggression(name):
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_make_a_ghost_note(name):
+def test_make_a_ghost_note(name) -> None:
     p = ref(name)
-    ghost = P.softer(p, 18)  # one command
+    ghost = patch.softer(p, 18)  # one command
     before, after = audio(p), audio(ghost)
     assert loudness(after) < loudness(before) - 8
     assert centroid(after) < centroid(before)  # softer is darker, not just quieter
@@ -207,19 +208,19 @@ def energy_time_ms(x):
     return 1000 * float(np.sum(t * x**2) / np.sum(x**2))
 
 
-def test_tighten_the_clap():
+def test_tighten_the_clap() -> None:
     p = ref("clap")
-    tighter = P.stretch(p, "all", 0.7, after_ms=0.0)  # one command: the bursts and the tail close up together
+    tighter = patch.stretch(p, "all", 0.7, after_ms=0.0)  # one command: the bursts and the tail close up together
     assert energy_time_ms(audio(tighter)) < 0.85 * energy_time_ms(audio(p))
 
 
-def test_shorten_the_clap_tail():
+def test_shorten_the_clap_tail() -> None:
     p = ref("clap")
-    shorter = P.stretch(p, "all", 0.6)  # one command
+    shorter = patch.stretch(p, "all", 0.6)  # one command
     assert decay_ms(audio(shorter)) < 0.8 * decay_ms(audio(p))
 
 
-def test_darken_the_clap():
+def test_darken_the_clap() -> None:
     p = ref("clap")
     darker = edit(
         p,
@@ -231,7 +232,7 @@ def test_darken_the_clap():
     assert centroid(audio(darker)) < 0.85 * centroid(audio(p))
 
 
-def test_add_aggression_to_the_clap():
+def test_add_aggression_to_the_clap() -> None:
     p = ref("clap")
     rougher = edit(p, **{"drive.db": p.drive.db + 8, "output.db": p.output.db - 5})
     assert crest_db(audio(rougher), 40) < crest_db(audio(p), 40) - 1.0
@@ -240,13 +241,13 @@ def test_add_aggression_to_the_clap():
 # From the snap.
 
 
-def test_shorten_the_snap():
+def test_shorten_the_snap() -> None:
     p = ref("snap")
-    shorter = P.stretch(p, "all", 0.6)
+    shorter = patch.stretch(p, "all", 0.6)
     assert decay_ms(audio(shorter)) < 0.8 * decay_ms(audio(p))
 
 
-def test_brighten_the_snap():
+def test_brighten_the_snap() -> None:
     p = ref("snap")
     band = p.noise[0].band_hz
     brighter = edit(
@@ -259,7 +260,7 @@ def test_brighten_the_snap():
     assert centroid(audio(brighter)) > 1.2 * centroid(audio(p))
 
 
-def test_move_the_ping():
+def test_move_the_ping() -> None:
     p = ref("snap")
     moved = edit(p, **{"body.tune_hz": round(p.body.tune_hz * 2 ** (-3 / 12), 3)})  # one field: three semitones down
     before, after = body_hz(audio(p), p), body_hz(audio(moved), moved)

@@ -57,7 +57,7 @@ MARGIN_DB = 20.0  # references must agree this far below the limits
 
 
 @functools.lru_cache(maxsize=8)
-def _mask(length: int, hi_rate: int, rate: int) -> Floats:
+def mask(length: int, hi_rate: int, rate: int) -> Floats:
     """Return the zero-phase mask: flat to 0.4·rate, then a raised cosine to zero at 0.5·rate."""
     f = np.arange(length // 2 + 1) * (hi_rate / length)
     edge = np.clip((f - 0.4 * rate) / (0.1 * rate), 0.0, 1.0)
@@ -80,7 +80,7 @@ def band_limited(v: Voice, rate: int, n_start: int, n_stop: int, m: int) -> Floa
         length = next_fast_len((b - a + 2 * GUARD) * m, real=True)
         start = (a - GUARD) * m
         y = saturate(v.alpha, _sources(v, hi, start, start + length, tabs))
-        z = irfft(rfft(y) * _mask(length, hi, rate), length)
+        z = irfft(rfft(y) * mask(length, hi, rate), length)
         out[a - n_start : b - n_start] = z[GUARD * m : (GUARD + b - a) * m : m]
     return out
 

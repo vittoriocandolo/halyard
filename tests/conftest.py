@@ -1,11 +1,16 @@
 # Copyright (C) 2026 Vittorio Candolo
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+"""The tests' shared patch: the plan's example, and ways to edit it by path."""
+
 import copy
 import re
 import tomllib
+from typing import Any
 
 import pytest
+
+from halyard_synth.patch import Patch, from_dict
 
 # The illustrative patch from the plan (§4).
 EXAMPLE = """\
@@ -71,16 +76,18 @@ polarity    = 1
 
 
 @pytest.fixture
-def example_dict():
+def example_dict() -> dict[str, Any]:
+    """Return the example patch's table, a fresh copy for each test."""
     return copy.deepcopy(tomllib.loads(EXAMPLE))
 
 
-def edit(d: dict, path: str, value) -> dict:
-    """Set a field by its patch path, counting from 1: edit(d, "noise[2].amp[3].ms", 5.0)."""
-    node = d
+def edit(d: dict[str, Any], path: str, value: object) -> dict[str, Any]:
+    """Set a field by its patch path, counting from 1, such as "noise[2].amp[3].ms", and return the table."""
+    node: Any = d
     parts = path.split(".")
     for i, part in enumerate(parts):
         m = re.fullmatch(r"(\w+)(?:\[(\d+)\])?", part)
+        assert m is not None, path
         name, index = m.group(1), m.group(2)
         last = i == len(parts) - 1
         if index is None:
@@ -95,10 +102,8 @@ def edit(d: dict, path: str, value) -> dict:
     return d
 
 
-def make(**edits):
-    """The example patch with edits by path, e.g. make(**{"noise[2].rattle": 0.3})."""
-    from halyard_synth.patch import from_dict
-
+def make(**edits: object) -> Patch:
+    """Return the example patch with edits by path, such as **{"noise[2].rattle": 0.3}."""
     d = tomllib.loads(EXAMPLE)
     for path, value in edits.items():
         edit(d, path, value)

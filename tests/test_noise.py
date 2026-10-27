@@ -27,7 +27,7 @@ def direct_slope(seed, lo, hi, j, rate):
     amp, theta = noise.amplitudes(seed, lo, hi)
     k = np.arange(1, noise.COMPONENTS + 1, dtype=np.int64)
     return np.array(
-        [-math.fsum(2 * np.pi * k * amp * np.sin(2 * np.pi * ((k * int(jj)) % rate / rate) + theta)) for jj in j]
+        [-math.fsum(2 * np.pi * k * amp * np.sin(2 * np.pi * ((k * int(jj)) % rate / rate) + theta)) for jj in j],
     )
 
 
@@ -47,7 +47,7 @@ def fresh_cache():
 # The integer stage and the coefficients.
 
 
-def test_integer_stage_is_pinned():
+def test_integer_stage_is_pinned() -> None:
     # It depends only on FIPS 202 and our key, so it is exact everywhere, and it may never change.
     a, b = noise.uniforms(1)
     assert [int(x) for x in a[:3]] == [7722249428135383, 2233965327905589, 1986645927032010]
@@ -57,18 +57,20 @@ def test_integer_stage_is_pinned():
     assert [int(x) for x in b[:2]] == [1925678445488676, 3621218641772745]
 
 
-def test_coefficients_follow_from_the_integers():
+def test_coefficients_follow_from_the_integers() -> None:
     a, b = noise.uniforms(7)
     rho, theta = noise.coefficients(7)
     for i in range(0, noise.COMPONENTS, 997):
         assert rho[i] == pytest.approx(math.sqrt(-2 * math.log((int(a[i]) + 1) / 2**53)), rel=1e-15)
         assert theta[i] == pytest.approx(2 * math.pi * int(b[i]) / 2**53, rel=1e-15, abs=1e-300)
-    assert np.all(np.isfinite(rho)) and np.all(rho >= 0)
+    assert np.all(np.isfinite(rho))
+    assert np.all(rho >= 0)
     assert np.all((theta >= 0) & (theta < 2 * np.pi))
-    assert not rho.flags.writeable and not theta.flags.writeable
+    assert not rho.flags.writeable
+    assert not theta.flags.writeable
 
 
-def test_stream_is_prefix_stable_and_repeatable():
+def test_stream_is_prefix_stable_and_repeatable() -> None:
     key = noise.KEY + (123).to_bytes(8, "little")
     short = hashlib.shake_256(key).digest(16 * 100)
     long = hashlib.shake_256(key).digest(16 * noise.COMPONENTS)
@@ -76,7 +78,7 @@ def test_stream_is_prefix_stable_and_repeatable():
     assert np.array_equal(noise.table(123, *WIRES, 48000), noise.table(123, *WIRES, 48000))
 
 
-def test_seed_range():
+def test_seed_range() -> None:
     for bad in (-1, 2**63):
         with pytest.raises(ValueError):
             noise.uniforms(bad)
@@ -84,7 +86,7 @@ def test_seed_range():
             noise.dither(bad, 4)
 
 
-def test_calibration_is_on_the_expected_power():
+def test_calibration_is_on_the_expected_power() -> None:
     # γ² Σ|H|² = ½ exactly, whatever the realization: realizations are never renormalized.
     for lo, hi in (WIDEST, WIRES, (20.0, 21.0), (19999.0, 20000.0)):
         amp, _ = noise.amplitudes(5, lo, hi)
@@ -92,7 +94,7 @@ def test_calibration_is_on_the_expected_power():
         assert math.fsum((amp / rho) ** 2) == pytest.approx(0.5, rel=1e-13)
 
 
-def test_band_edges_are_half_power_points():
+def test_band_edges_are_half_power_points() -> None:
     power = noise.band_power(100.0, 10000.0)
     assert power[100 - 1] == pytest.approx(0.5, rel=1e-7)
     assert power[10000 - 1] == pytest.approx(0.5, rel=1e-7)
@@ -101,7 +103,7 @@ def test_band_edges_are_half_power_points():
 # Tables sample the continuous definition exactly.
 
 
-def test_table_samples_the_continuous_definition():
+def test_table_samples_the_continuous_definition() -> None:
     rate = 48000
     j = np.array([0, 1, 17, 4801, 23999, 47999])
     x = noise.table(5, 300.0, 12000.0, rate)
@@ -109,21 +111,21 @@ def test_table_samples_the_continuous_definition():
 
 
 @pytest.mark.parametrize(
-    "r1, r2, step1, step2",
+    ("r1", "r2", "step1", "step2"),
     [
         (1411200, 1536000, 147, 160),  # the two families at 32×: common instants every 1/9600 s
         (768000, 1536000, 1, 2),
         (1536000, 6144000, 1, 4),  # an internal rate and the reference rate
     ],
 )
-def test_common_instants_agree_across_rates(r1, r2, step1, step2):
+def test_common_instants_agree_across_rates(r1, r2, step1, step2) -> None:
     x1 = noise.table(9, *WIRES, r1)[::step1]
     x2 = noise.table(9, *WIRES, r2)[::step2]
     assert x1.size == x2.size
     assert np.max(np.abs(x1 - x2)) <= 1e-12
 
 
-def test_rate_requirements():
+def test_rate_requirements() -> None:
     for bad in (40000, 48001):
         with pytest.raises(ValueError):
             noise.table(1, *WIRES, bad)
@@ -131,8 +133,8 @@ def test_rate_requirements():
             noise.tables(1, [WIRES], bad)
 
 
-@pytest.mark.parametrize("lo, hi", [(20.0, 21.0), WIDEST, (19999.0, 20000.0), (5000.0, 5001.0)])
-def test_extreme_bands_are_well_behaved(lo, hi):
+@pytest.mark.parametrize(("lo", "hi"), [(20.0, 21.0), WIDEST, (19999.0, 20000.0), (5000.0, 5001.0)])
+def test_extreme_bands_are_well_behaved(lo, hi) -> None:
     x = noise.table(1, lo, hi, 48000)
     assert np.all(np.isfinite(x))
     assert np.max(np.abs(x)) < 10
@@ -141,7 +143,7 @@ def test_extreme_bands_are_well_behaved(lo, hi):
 # Statistics.
 
 
-def test_ensemble_mean_square_is_calibrated():
+def test_ensemble_mean_square_is_calibrated() -> None:
     ms = np.array([np.mean(noise.table(seed, *WIRES, 48000) ** 2) for seed in range(200)])
     assert abs(ms.mean() / 0.5 - 1) <= 0.005
     # The spread of a realization's power is that of Σ|H|²ρ² with E ρ⁴ = 8.
@@ -150,7 +152,7 @@ def test_ensemble_mean_square_is_calibrated():
     assert ms.std(ddof=1) / 0.5 == pytest.approx(predicted, rel=0.2)
 
 
-def test_ensemble_spectrum_follows_the_band_shape():
+def test_ensemble_spectrum_follows_the_band_shape() -> None:
     rate, (lo, hi) = 48000, WIRES
     power = noise.band_power(lo, hi)
     gamma2 = 0.5 / np.sum(power)
@@ -190,7 +192,7 @@ def ensemble():
     return {band: np.array(v) for band, v in values.items()}
 
 
-def test_marginal_is_gaussian(ensemble):
+def test_marginal_is_gaussian(ensemble) -> None:
     values = ensemble[WIRES]
     assert stats.kstest(values, stats.norm(scale=math.sqrt(0.5)).cdf).pvalue > 1e-3
     assert abs(values.mean()) <= 5 * math.sqrt(0.5 / values.size)
@@ -199,23 +201,23 @@ def test_marginal_is_gaussian(ensemble):
 # Coherent layers.
 
 
-def test_identical_bands_give_bit_identical_layers(fresh_cache):
+def test_identical_bands_give_bit_identical_layers(fresh_cache) -> None:
     a, b, c = noise.tables(3, [WIRES, (1500.0, 16000.0), WIRES], 48000)
     assert a is c
     assert np.array_equal(a, noise.table(3, *WIRES, 48000))
     assert not np.array_equal(a, b)
 
 
-def test_a_table_never_depends_on_its_companions(fresh_cache):
+def test_a_table_never_depends_on_its_companions(fresh_cache) -> None:
     bands = [WIDEST, WIRES, (1500.0, 16000.0), (800.0, 2500.0)]
     together = noise.tables(11, bands, 1536000)
-    for band, t in zip(bands, together):
+    for band, t in zip(bands, together, strict=True):
         noise._CACHE.clear()
         (alone,) = noise.tables(11, [band], 1536000)
         assert np.array_equal(alone, t)
 
 
-def test_band_edits_reweight_the_same_noise():
+def test_band_edits_reweight_the_same_noise() -> None:
     a = noise.table(3, 2500.0, 9000.0, 48000)
     b = noise.table(3, 2500.0, 9500.0, 48000)
     assert np.corrcoef(a, b)[0, 1] >= 0.999
@@ -228,7 +230,7 @@ def test_band_edits_reweight_the_same_noise():
     np.testing.assert_allclose(amp_a / amp_b, expected, rtol=1e-12)
 
 
-def test_layers_correlate_exactly_by_their_spectral_overlap():
+def test_layers_correlate_exactly_by_their_spectral_overlap() -> None:
     # Over one period the cross terms of distinct components vanish, so the correlation of two
     # layers is exactly the ρ²-weighted overlap of their bands, for every realization.
     rate = 48000
@@ -240,7 +242,7 @@ def test_layers_correlate_exactly_by_their_spectral_overlap():
             assert np.mean(x1 * x2) == pytest.approx(math.fsum(a1 * a2) / 2, rel=1e-11)
 
 
-def test_disjoint_bands_are_uncorrelated_within_their_skirts(ensemble):
+def test_disjoint_bands_are_uncorrelated_within_their_skirts(ensemble) -> None:
     # Across the ensemble, at any instant, two layers correlate by their bands' overlap only.
     p1, p2 = noise.band_power(*LOW), noise.band_power(*HIGH)
     overlap = np.sum(np.sqrt(p1 * p2)) / math.sqrt(np.sum(p1) * np.sum(p2))
@@ -252,7 +254,7 @@ def test_disjoint_bands_are_uncorrelated_within_their_skirts(ensemble):
 # Values and slopes between samples.
 
 
-def test_direct_evaluation_and_derivative():
+def test_direct_evaluation_and_derivative() -> None:
     rate = 48000
     x = noise.table(4, *WIRES, rate)
     j = np.array([0, 11, 2400, 47999])
@@ -265,7 +267,7 @@ def test_direct_evaluation_and_derivative():
 
 
 @pytest.mark.parametrize("rate", [1411200, 1536000])
-def test_interpolation_is_accurate_at_the_internal_rates(rate):
+def test_interpolation_is_accurate_at_the_internal_rates(rate) -> None:
     # The kink bound takes carriers at knots from the tables and is inflated by 1% to cover this.
     rng = np.random.default_rng(0)
     t = np.concatenate((rng.uniform(0, 1, 400), [0.0, 1e-9, 0.99999999, 0.5]))
@@ -276,7 +278,7 @@ def test_interpolation_is_accurate_at_the_internal_rates(rate):
         assert np.max(np.abs(slope - noise.at(2, lo, hi, t, derivative=True))) <= 1.5e-4 * rms_slope(2, lo, hi)
 
 
-def test_interpolation_is_exact_at_samples_and_periodic():
+def test_interpolation_is_exact_at_samples_and_periodic() -> None:
     rate = 48000
     tab = noise.table(6, *WIRES, rate)
     j = np.array([0, 5, 47999])
@@ -289,7 +291,7 @@ def test_interpolation_is_exact_at_samples_and_periodic():
 # Dither.
 
 
-def test_dither_is_triangular_and_reproducible():
+def test_dither_is_triangular_and_reproducible() -> None:
     d = noise.dither(3, 200000)
     assert np.array_equal(d, noise.dither(3, 200000))
     assert np.array_equal(d[:1000], noise.dither(3, 1000))
@@ -301,7 +303,7 @@ def test_dither_is_triangular_and_reproducible():
     assert noise.dither(3, 0).size == 0
 
 
-def test_dither_has_its_own_stream():
+def test_dither_has_its_own_stream() -> None:
     stream = hashlib.shake_256(noise.DITHER_KEY + (1).to_bytes(8, "little")).digest(8)
     u = np.frombuffer(stream, dtype="<u4")
     assert noise.dither(1, 1)[0] == (int(u[0]) - int(u[1])) / 2**32
@@ -311,16 +313,17 @@ def test_dither_has_its_own_stream():
 # The cache.
 
 
-def test_cache_returns_the_same_read_only_tables(fresh_cache):
+def test_cache_returns_the_same_read_only_tables(fresh_cache) -> None:
     first = noise.tables(1, [WIRES, WIDEST], 48000)
     again = noise.tables(1, [WIDEST, WIRES], 48000)
-    assert again[0] is first[1] and again[1] is first[0]
+    assert again[0] is first[1]
+    assert again[1] is first[0]
     assert all(not t.flags.writeable for t in first)
     with pytest.raises(ValueError):
         first[0][0] = 1.0
 
 
-def test_cache_evicts_the_least_recently_used(fresh_cache):
+def test_cache_evicts_the_least_recently_used(fresh_cache) -> None:
     n = noise.CACHE_TABLES
     keep = noise.tables(1, [WIRES], 48000)[0]
     for i in range(n + 2):
@@ -331,12 +334,13 @@ def test_cache_evicts_the_least_recently_used(fresh_cache):
     # A render with more layers than the cache holds still gets all of them.
     bands = [(200.0 + i, 5000.0) for i in range(n + 3)]
     out = noise.tables(1, bands, 48000)
-    assert len(out) == n + 3 and len(noise._CACHE) == n + 3
+    assert len(out) == n + 3
+    assert len(noise._CACHE) == n + 3
     noise.tables(1, [WIRES], 48000)
     assert len(noise._CACHE) == n
 
 
-def test_cache_is_safe_across_threads(fresh_cache):
+def test_cache_is_safe_across_threads(fresh_cache) -> None:
     results = []
 
     def work():

@@ -2,15 +2,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import dataclasses
+import itertools
 import math
 import re
+from pathlib import Path
 
 import numpy as np
 import pytest
 import soundfile
 
-from halyard_synth import cli, wav
-from halyard_synth import pack as K
+from halyard_synth import cli, pack, wav
 from halyard_synth.loudness import momentary_max
 from halyard_synth.patch import dumps, loads, softer
 
@@ -53,52 +54,56 @@ def ladder(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def built(ladder):
-    return K.build([(p.stem, loads(p.read_text())) for p in ladder], K.Options(3))
+    return pack.build([(p.stem, loads(p.read_text())) for p in ladder], pack.Options(3))
 
 
-def test_velocity_ranges_follow_the_square_law():
-    ranges = K.velocity_ranges([0.0, -6.0, -12.0, -24.0])
-    assert ranges[0][1] == 127 and ranges[-1][0] == 1
-    for (lo, _), (_, hi) in zip(ranges, ranges[1:]):
+def test_velocity_ranges_follow_the_square_law() -> None:
+    ranges = pack.velocity_ranges([0.0, -6.0, -12.0, -24.0])
+    assert ranges[0][1] == 127
+    assert ranges[-1][0] == 1
+    for (lo, _), (_, hi) in itertools.pairwise(ranges):
         assert hi == lo - 1  # contiguous, no gaps and no overlaps
     # A layer 6 dB down sits where 40·log10(v/127) = −6: v ≈ 90; neighbours meet halfway in dB.
     natural = 127 * 10 ** (-6 / 40)
     assert ranges[1][0] <= natural <= ranges[1][1]
     assert ranges[0][0] == math.floor(math.sqrt(127 * natural)) + 1
-    with pytest.raises(K.PackError):
-        K.velocity_ranges([0.0, -0.001, -0.002])
+    with pytest.raises(pack.PackError):
+        pack.velocity_ranges([0.0, -0.001, -0.002])
 
 
-def test_the_curve_puts_each_layer_on_the_square_law():
+def test_the_curve_puts_each_layer_on_the_square_law() -> None:
     for relative in (0.0, -5.0, -17.5):
         lo, hi = 40, 90
-        volume, curve = K.curve_for(relative, lo, hi)
-        assert max(curve) == 1.0 and min(curve) > 0
-        for v, c in zip(range(lo, hi + 1), curve):
+        volume, curve = pack.curve_for(relative, lo, hi)
+        assert max(curve) == 1.0
+        assert min(curve) > 0
+        for v, c in zip(range(lo, hi + 1), curve, strict=True):
             assert relative + volume + 20 * math.log10(c) == pytest.approx(40 * math.log10(v / 127), abs=1e-9)
 
 
-def test_every_velocity_and_take_maps_to_exactly_one_file(built, tmp_path):
-    written = K.write(built, tmp_path)
+def test_every_velocity_and_take_maps_to_exactly_one_file(built, tmp_path: Path) -> None:
+    written = pack.write(built, tmp_path)
     text = (tmp_path / "snare.sfz").read_text()
     rs = regions(text)
-    assert len(rs) == 4 * 3 and all(r["key"] == "38" and r["pitch_keytrack"] == "0" for r in rs)
+    assert len(rs) == 4 * 3
+    assert all(r["key"] == "38" and r["pitch_keytrack"] == "0" for r in rs)
     for v in range(1, 128):
         for position in (1, 2, 3):
             hits = [r for r in rs if int(r["lovel"]) <= v <= int(r["hivel"]) and int(r["seq_position"]) == position]
-            assert len(hits) == 1 and hits[0]["seq_length"] == "3"
+            assert len(hits) == 1
+            assert hits[0]["seq_length"] == "3"
             assert (tmp_path / hits[0]["sample"]).exists()
     assert {p.name for p in written} == {r["sample"] for r in rs} | {"snare.sfz"}
 
 
-def test_the_level_follows_the_square_law_across_layer_boundaries(built, tmp_path):
-    K.write(built, tmp_path)
+def test_the_level_follows_the_square_law_across_layer_boundaries(built, tmp_path: Path) -> None:
+    pack.write(built, tmp_path)
     text = (tmp_path / "snare.sfz").read_text()
     groups = [ops for header, ops in parse_sfz(text) if header == "group"]
     rate = built.layers[0].patch.output.sample_rate
     top = None
     levels = []
-    for group, layer in zip(groups, built.layers):
+    for group, layer in zip(groups, built.layers, strict=True):
         # The level of the layer's first take, measured from its file.
         name = [r["sample"] for r in regions(text) if r["lovel"] == group["lovel"] and r["seq_position"] == "1"][0]
         data, _ = soundfile.read(tmp_path / name, dtype="float64")
@@ -113,32 +118,33 @@ def test_the_level_follows_the_square_law_across_layer_boundaries(built, tmp_pat
         assert level == pytest.approx(40 * math.log10(v / 127), abs=0.01)
     # Within one velocity step across every boundary.
     step = {v: 40 * math.log10((v + 1) / v) for v in range(1, 127)}
-    for (v0, l0), (v1, l1) in zip(levels, levels[1:]):
-        assert v1 == v0 + 1 and 0 < l1 - l0 <= step[v0] + 0.02
+    for (v0, l0), (v1, l1) in itertools.pairwise(levels):
+        assert v1 == v0 + 1
+        assert 0 < l1 - l0 <= step[v0] + 0.02
 
 
-def test_the_pack_shares_one_gain(ladder):
+def test_the_pack_shares_one_gain(ladder) -> None:
     peak = dataclasses.replace(loads(ladder[0].read_text()).output, mode="peak", db=-1.0)
     patches = [(p.stem, dataclasses.replace(loads(p.read_text()), output=peak)) for p in ladder]
-    pk = K.build(patches, K.Options(2))
+    pk = pack.build(patches, pack.Options(2))
     peaks = [float(np.max(np.abs(a))) for row in pk.audio for a in row]
     assert 20 * math.log10(max(peaks)) == pytest.approx(-1.0, abs=1e-6)
     assert peaks.index(max(peaks)) < 2  # the loudest layer holds the loudest file
     assert len({round(p, 9) for p in peaks}) == len(peaks)  # the others keep their natural levels
 
 
-def test_level_matching_within_each_layer(ladder):
+def test_level_matching_within_each_layer(ladder) -> None:
     patches = [(p.stem, loads(p.read_text())) for p in ladder[:2]]
-    pk = K.build(patches, K.Options(4, level_match=True))
-    for layer, files in zip(pk.layers, pk.audio):
+    pk = pack.build(patches, pack.Options(4, level_match=True))
+    for layer, files in zip(pk.layers, pk.audio, strict=True):
         rate = layer.patch.output.sample_rate
         first = momentary_max(files[0], rate)
         assert all(momentary_max(a, rate) == pytest.approx(first, abs=0.01) for a in files)
         assert layer.spread < 0.01
 
 
-def test_files_carry_their_take_and_layer(built, tmp_path):
-    K.write(built, tmp_path)
+def test_files_carry_their_take_and_layer(built, tmp_path: Path) -> None:
+    pack.write(built, tmp_path)
     for i, layer in enumerate(built.layers, 1):
         for j, name in enumerate(layer.files("snare"), 1):
             assert name == f"snare_v{layer.hivel}_rr{j}.wav"
@@ -148,42 +154,47 @@ def test_files_carry_their_take_and_layer(built, tmp_path):
             assert meta["set_gain_db"] == built.set_gain_db
 
 
-def test_a_pack_re_renders_bit_identically(ladder, tmp_path):
+def test_a_pack_re_renders_bit_identically(ladder, tmp_path: Path) -> None:
     patches = [(p.stem, loads(p.read_text())) for p in ladder[:2]]
     for d in ("a", "b"):
-        K.write(K.build(patches, K.Options(2)), tmp_path / d)
+        pack.write(pack.build(patches, pack.Options(2)), tmp_path / d)
     for f in sorted((tmp_path / "a").iterdir()):
         assert f.read_bytes() == (tmp_path / "b" / f.name).read_bytes()
 
 
-def test_a_clap_takes_the_clap_key():
+def test_a_clap_takes_the_clap_key() -> None:
     clap = loads(cli.reference_text("clap"))
-    pk = K.build([("clap", clap), ("clap-12", softer(clap, 12))], K.Options(1))
-    assert pk.key == 39 and "key=39" in pk.sfz()
-    assert K.build([("clap", clap)], K.Options(1, 40)).key == 40
+    pk = pack.build([("clap", clap), ("clap-12", softer(clap, 12))], pack.Options(1))
+    assert pk.key == 39
+    assert "key=39" in pk.sfz()
+    assert pack.build([("clap", clap)], pack.Options(1, 40)).key == 40
 
 
-def test_packs_refuse_what_they_cannot_map(ladder):
+def test_packs_refuse_what_they_cannot_map(ladder) -> None:
     loud, soft = loads(ladder[0].read_text()), loads(ladder[1].read_text())
-    with pytest.raises(K.PackError, match="not softer"):
-        K.build([("soft", soft), ("loud", loud)])
+    with pytest.raises(pack.PackError, match="not softer"):
+        pack.build([("soft", soft), ("loud", loud)])
     other = loads(ladder[1].read_text().replace("sample_rate = 48000", "sample_rate = 44100"))
-    with pytest.raises(K.PackError, match="output.sample_rate"):
-        K.build([("loud", loud), ("other", other)])
+    with pytest.raises(pack.PackError, match="output.sample_rate"):
+        pack.build([("loud", loud), ("other", other)])
     silent = dataclasses.replace(
         soft,
         body=dataclasses.replace(soft.body, level_db=-math.inf),
         noise=tuple(dataclasses.replace(n, level_db=-math.inf) for n in soft.noise),
     )
-    with pytest.raises(K.PackError, match="silent"):
-        K.build([("loud", loud), ("silent", silent)])
+    with pytest.raises(pack.PackError, match="silent"):
+        pack.build([("loud", loud), ("silent", silent)])
 
 
-def test_the_command_writes_a_pack(ladder, tmp_path, capsys):
+def test_the_command_writes_a_pack(ladder, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     out = tmp_path / "kit"
     code = cli.main(["pack", *map(str, ladder), "--takes", "2", "--out", str(out)])
     text = capsys.readouterr().out
-    assert code == 0 and "4 velocity layers × 2 takes = 8 files" in text and "velocities" in text
-    assert (out / "snare.sfz").exists() and len(list(out.glob("*.wav"))) == 8
+    assert code == 0
+    assert "4 velocity layers × 2 takes = 8 files" in text
+    assert "velocities" in text
+    assert (out / "snare.sfz").exists()
+    assert len(list(out.glob("*.wav"))) == 8
     code = cli.main(["pack", str(ladder[1]), str(ladder[0]), "--out", str(tmp_path / "bad")])
-    assert code == 2 and "not softer" in capsys.readouterr().err
+    assert code == 2
+    assert "not softer" in capsys.readouterr().err
