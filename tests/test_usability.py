@@ -14,38 +14,51 @@ import math
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from halyard_synth import patch
 from halyard_synth.cli import reference_text
+from halyard_synth.loudness import momentary_max
 from halyard_synth.render import render
 
 from .conftest import edit as set_path
 
+type Floats = NDArray[np.float64]
+
 RATE = 48000
 SNARES = ("tone", "crack", "fat", "driven")
+EDITS = 3  # a task takes at most this many field edits
+CENTS = 5  # the measured tuning is right within this
+PING_CENTS = 10  # and the snap's ping, a shorter sound, within this
+LOUDER = 1.4  # a task that adds something adds at least this much energy where it should
+GHOST_DB = 8  # a ghost note 18 dB softer reads at least this much quieter
+DENSER_DB = 1.0  # more drive lifts the tail against the onset by at least this
 
 
-def ref(name):
+def ref(name: str) -> patch.Patch:
+    """Return a reference patch."""
     return patch.loads(reference_text(name))
 
 
-def edit(p, **fields):
-    """Field edits by patch path, such as edit(p, **{"noise[2].level_db": -3.0}); the caller counts them."""
-    assert len(fields) <= 3
+def edit(p: patch.Patch, **fields: object) -> patch.Patch:
+    """Apply field edits by patch path, such as **{"noise[2].level_db": -3.0}; at most three."""
+    assert len(fields) <= EDITS
     d = patch.to_dict(p)
     for path, value in fields.items():
         set_path(d, path, value)
     return patch.from_dict(d)
 
 
-def audio(p):
+def audio(p: patch.Patch) -> Floats:
+    """Render a patch, which must be inside the domain and not over."""
     a, report = render(p)
-    assert report.inside and not report.over, str(report)
+    assert report.inside, str(report)
+    assert not report.over, str(report)
     return a.astype(float)
 
 
-def faded(x, start_ms, length_ms):
-    """A window from start_ms, flat for its first half and faded out over the second."""
+def faded(x: Floats, start_ms: float, length_ms: float) -> Floats:
+    """Return a window from start_ms, flat for its first half and faded out over the second."""
     a, n = int(start_ms / 1000 * RATE), int(length_ms / 1000 * RATE)
     seg = np.zeros(n)
     part = x[a : a + n]
@@ -55,35 +68,33 @@ def faded(x, start_ms, length_ms):
     return seg * fade
 
 
-def spectrum(seg):
+def spectrum(seg: Floats) -> tuple[Floats, Floats]:
+    """Return a window's frequencies and power."""
     power = np.abs(np.fft.rfft(seg, 1 << 16)) ** 2
     return np.fft.rfftfreq(1 << 16, 1 / RATE), power
 
 
-def centroid(x, start_ms=0.0, length_ms=120.0):
+def centroid(x: Floats, start_ms: float = 0.0, length_ms: float = 120.0) -> float:
+    """Return a window's spectral centroid."""
     f, power = spectrum(faded(x, start_ms, length_ms))
     return float(np.sum(f * power) / np.sum(power))
 
 
-def band_energy(x, lo, hi, start_ms=0.0, length_ms=120.0):
+def band_energy(x: Floats, lo: float, hi: float, start_ms: float = 0.0, length_ms: float = 120.0) -> float:
+    """Return a window's energy in a band."""
     f, power = spectrum(faded(x, start_ms, length_ms))
     return float(np.sum(power[(f >= lo) & (f < hi)]))
 
 
-def share(x, lo, hi, start_ms=0.0, length_ms=120.0):
-    f, power = spectrum(faded(x, start_ms, length_ms))
-    return float(np.sum(power[(f >= lo) & (f < hi)]) / np.sum(power))
-
-
-def decay_ms(x, drop_db=40):
-    """When the 5 ms RMS envelope last sits within drop_db of its peak."""
+def decay_ms(x: Floats, drop_db: float = 40) -> float:
+    """Return when the 5 ms RMS envelope last sits within drop_db of its peak."""
     w = RATE // 200
     rms = np.sqrt(np.convolve(x**2, np.ones(w) / w, mode="same"))
-    return 1000 * np.flatnonzero(rms >= rms.max() * 10 ** (-drop_db / 20))[-1] / RATE
+    return 1000 * float(np.flatnonzero(rms >= rms.max() * 10 ** (-drop_db / 20))[-1]) / RATE
 
 
-def body_hz(x, p):
-    """The body's settled frequency: the spectral peak near the tuning, after the glide."""
+def body_hz(x: Floats, p: patch.Patch) -> float:
+    """Return the body's settled frequency: the spectral peak near the tuning, after the glide."""
     start = p.body.pitch[-1][0] + 5
     length = min(80.0, max(20.0, 0.5 * p.body.amp[-1][0] - start))
     f, power = spectrum(faded(x, start, length) * np.hanning(int(length / 1000 * RATE)))
@@ -93,19 +104,19 @@ def body_hz(x, p):
     return float(f[i] + 0.5 * (a - c) / (a - 2 * b + c) * (f[1] - f[0]))
 
 
-def crest_db(x, length_ms=60.0):
+def crest_db(x: Floats, length_ms: float = 60.0) -> float:
+    """Return the onset's crest factor, peak over RMS, in dB."""
     seg = x[: int(length_ms / 1000 * RATE)]
     return 20 * math.log10(np.max(np.abs(seg)) / np.sqrt(np.mean(seg**2)))
 
 
-def loudness(x):
-    from halyard_synth.loudness import momentary_max
-
+def loudness(x: Floats) -> float:
+    """Return the largest momentary loudness."""
     return momentary_max(x, RATE)
 
 
-def layer_index(p, fastest: bool) -> int:
-    """The stick (the layer whose shape ends first) or the wires (the longest), 1-based."""
+def layer_index(p: patch.Patch, *, fastest: bool) -> int:
+    """Return the stick (the layer whose shape ends first) or the wires (the longest), counting from 1."""
     ends = [layer.amp[-1][0] for layer in p.noise]
     return 1 + (ends.index(min(ends)) if fastest else ends.index(max(ends)))
 
@@ -114,44 +125,49 @@ def layer_index(p, fastest: bool) -> int:
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_change_the_tuning(name) -> None:
+def test_change_the_tuning(name: str) -> None:
+    """Tune each snare up a whole tone with one field, and hear it measured at its tuning, then 200 cents up."""
     p = ref(name)
     up = round(p.body.tune_hz * 2 ** (2 / 12), 3)  # one field: a whole tone up
     before, after = body_hz(audio(p), p), body_hz(audio(edit(p, **{"body.tune_hz": up})), p)
-    assert 1200 * math.log2(before / p.body.tune_hz) == pytest.approx(0, abs=5)
-    assert 1200 * math.log2(after / before) == pytest.approx(200, abs=5)
+    assert 1200 * math.log2(before / p.body.tune_hz) == pytest.approx(0, abs=CENTS)
+    assert 1200 * math.log2(after / before) == pytest.approx(200, abs=CENTS)
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_shorten_the_tail(name) -> None:
+def test_shorten_the_tail(name: str) -> None:
+    """Shorten each snare's tail with one command."""
     p = ref(name)
     shorter = patch.stretch(p, "all", 0.6)  # one command
     assert decay_ms(audio(shorter)) < 0.8 * decay_ms(audio(p))
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_add_crack(name) -> None:
+def test_add_crack(name: str) -> None:
+    """Add crack to each snare with one field: the stick's level, more high end in the first millisecond."""
     p = ref(name)
     j = layer_index(p, fastest=True)
     louder = edit(p, **{f"noise[{j}].level_db": p.noise[j - 1].level_db + 6})  # one field: the stick
     # More high end in the first millisecond; in the driven reference less, since there the edge is
     # mostly the saturated wires and body.
-    assert band_energy(audio(louder), 4000, 20000, 0, 1) > 1.4 * band_energy(audio(p), 4000, 20000, 0, 1)
+    assert band_energy(audio(louder), 4000, 20000, 0, 1) > LOUDER * band_energy(audio(p), 4000, 20000, 0, 1)
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_add_body(name) -> None:
+def test_add_body(name: str) -> None:
+    """Add body to each snare with one field: more of the body's band against the noise's."""
     p = ref(name)
     fuller = edit(p, **{"body.level_db": p.body.level_db + 4})  # one field
 
-    def tone_to_noise(x):
+    def tone_to_noise(x: Floats) -> float:
         return band_energy(x, 0, 2.5 * p.body.tune_hz) / band_energy(x, 2000, 20000)
 
     assert tone_to_noise(audio(fuller)) > 1.5 * tone_to_noise(audio(p))
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_add_wires(name) -> None:
+def test_add_wires(name: str) -> None:
+    """Add wires to each snare with two fields: more wire energy in the tail, above the body's modes."""
     p = ref(name)
     j = layer_index(p, fastest=False)
     layer = p.noise[j - 1]
@@ -164,7 +180,8 @@ def test_add_wires(name) -> None:
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_darken(name) -> None:
+def test_darken(name: str) -> None:
+    """Darken each snare with a field per layer: the layers' upper edges lower, the centroid lower."""
     p = ref(name)
     darker = edit(
         p,
@@ -176,51 +193,56 @@ def test_darken(name) -> None:
     assert centroid(audio(darker)) < 0.9 * centroid(audio(p))
 
 
-def sustain_db(x):
-    """The body of the hit against its onset: RMS over 20–80 ms relative to the first 10 ms."""
+def sustain_db(x: Floats) -> float:
+    """Return the body of the hit against its onset: RMS over 20–80 ms relative to the first 10 ms."""
     tail, onset = x[int(0.02 * RATE) : int(0.08 * RATE)], x[: int(0.01 * RATE)]
     return 20 * math.log10(np.sqrt(np.mean(tail**2)) / np.sqrt(np.mean(onset**2)))
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_add_aggression(name) -> None:
+def test_add_aggression(name: str) -> None:
+    """Add aggression to each snare with two fields: more drive, less output gain, a denser tail."""
     p = ref(name)
     rougher = edit(p, **{"drive.db": p.drive.db + 6, "output.db": p.output.db - 4})  # two fields
     # Denser: the drive lifts the tail against the onset, even where the peaks are already saturated.
-    assert sustain_db(audio(rougher)) > sustain_db(audio(p)) + 1.0
+    assert sustain_db(audio(rougher)) > sustain_db(audio(p)) + DENSER_DB
 
 
 @pytest.mark.parametrize("name", SNARES)
-def test_make_a_ghost_note(name) -> None:
+def test_make_a_ghost_note(name: str) -> None:
+    """Make a ghost note of each snare with one command: quieter, and darker too."""
     p = ref(name)
     ghost = patch.softer(p, 18)  # one command
     before, after = audio(p), audio(ghost)
-    assert loudness(after) < loudness(before) - 8
+    assert loudness(after) < loudness(before) - GHOST_DB
     assert centroid(after) < centroid(before)  # softer is darker, not just quieter
 
 
 # From the clap.
 
 
-def energy_time_ms(x):
-    """The centre of gravity of the energy in time."""
+def energy_time_ms(x: Floats) -> float:
+    """Return the centre of gravity of the energy in time."""
     t = np.arange(x.size) / RATE
     return 1000 * float(np.sum(t * x**2) / np.sum(x**2))
 
 
 def test_tighten_the_clap() -> None:
+    """Tighten the clap with one command: the bursts and the tail close up, the energy earlier."""
     p = ref("clap")
     tighter = patch.stretch(p, "all", 0.7, after_ms=0.0)  # one command: the bursts and the tail close up together
     assert energy_time_ms(audio(tighter)) < 0.85 * energy_time_ms(audio(p))
 
 
 def test_shorten_the_clap_tail() -> None:
+    """Shorten the clap's tail with one command."""
     p = ref("clap")
     shorter = patch.stretch(p, "all", 0.6)  # one command
     assert decay_ms(audio(shorter)) < 0.8 * decay_ms(audio(p))
 
 
 def test_darken_the_clap() -> None:
+    """Darken the clap with a field per layer."""
     p = ref("clap")
     darker = edit(
         p,
@@ -233,21 +255,24 @@ def test_darken_the_clap() -> None:
 
 
 def test_add_aggression_to_the_clap() -> None:
+    """Add aggression to the clap with two fields: a lower crest factor."""
     p = ref("clap")
     rougher = edit(p, **{"drive.db": p.drive.db + 8, "output.db": p.output.db - 5})
-    assert crest_db(audio(rougher), 40) < crest_db(audio(p), 40) - 1.0
+    assert crest_db(audio(rougher), 40) < crest_db(audio(p), 40) - DENSER_DB
 
 
 # From the snap.
 
 
 def test_shorten_the_snap() -> None:
+    """Shorten the snap with one command."""
     p = ref("snap")
     shorter = patch.stretch(p, "all", 0.6)
     assert decay_ms(audio(shorter)) < 0.8 * decay_ms(audio(p))
 
 
 def test_brighten_the_snap() -> None:
+    """Brighten the snap with two fields: its burst's band higher and louder."""
     p = ref("snap")
     band = p.noise[0].band_hz
     brighter = edit(
@@ -261,7 +286,8 @@ def test_brighten_the_snap() -> None:
 
 
 def test_move_the_ping() -> None:
+    """Move the snap's ping three semitones down with one field."""
     p = ref("snap")
     moved = edit(p, **{"body.tune_hz": round(p.body.tune_hz * 2 ** (-3 / 12), 3)})  # one field: three semitones down
     before, after = body_hz(audio(p), p), body_hz(audio(moved), moved)
-    assert 1200 * math.log2(after / before) == pytest.approx(-300, abs=10)
+    assert 1200 * math.log2(after / before) == pytest.approx(-300, abs=PING_CENTS)
