@@ -1,6 +1,8 @@
 # Copyright (C) 2026 Vittorio Candolo
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+"""The command line: every command, its output, and what it refuses (plan §7.6)."""
+
 import dataclasses
 from pathlib import Path
 
@@ -14,62 +16,77 @@ from halyard_synth.render import render, render_takes
 
 from .conftest import EXAMPLE
 
+BAD_INPUT, REFUSED = 2, 1  # the exit statuses of bad input, and of a refusal
+RATE = 48000
+D3 = 146.832  # D3 in Hz, as `--tune D3` writes it
+TAKES = 3
+BURST_KNOTS = 14  # four bursts: 3N + 2 knots
+PITCH_END_MS = 29.95  # the pitch's last knot, 15 ms, stretched twice after 0.05 ms, as decimals
+STICK_END_MS = 15.95  # and the stick's, 8 ms
 
-def run(capsys, *args):
+
+def run(capsys: pytest.CaptureFixture[str], *args: object) -> tuple[int, str, str]:
+    """Run a command, and return its status, its output and its errors."""
     code = cli.main([str(a) for a in args])
     out, err = capsys.readouterr()
     return code, out, err
 
 
 @pytest.fixture
-def example(tmp_path):
+def example(tmp_path: Path) -> Path:
+    """Write the example patch to a file."""
     path = tmp_path / "snare.toml"
-    path.write_text(EXAMPLE)
+    path.write_text(EXAMPLE, encoding="utf-8")
     return path
 
 
 @pytest.mark.parametrize("name", cli.REFERENCES)
-def test_init_writes_complete_patches(capsys: pytest.CaptureFixture[str], name) -> None:
+def test_init_writes_complete_patches(capsys: pytest.CaptureFixture[str], name: str) -> None:
+    """Print every reference as a complete, canonical patch."""
     code, out, _ = run(capsys, "init", name)
     assert code == 0
     assert out == dumps(loads(out))
 
 
 def test_init_tunes_to_a_note_but_keeps_hertz(capsys: pytest.CaptureFixture[str]) -> None:
+    """Tune a reference to a note or a frequency, writing Hz, and refuse what is not a note or out of range."""
     code, out, _ = run(capsys, "init", "crack", "--tune", "D3")
     assert code == 0
     assert "tune_hz  = 146.832" in out
-    assert loads(out).body.tune_hz == 146.832
-    assert loads(run(capsys, "init", "tone", "--tune", "210.5")[1]).body.tune_hz == 210.5
+    assert loads(out).body.tune_hz == D3
+    hz = 210.5
+    assert loads(run(capsys, "init", "tone", "--tune", str(hz))[1]).body.tune_hz == hz
     code, _, err = run(capsys, "init", "crack", "--tune", "H9")
-    assert code == 2
+    assert code == BAD_INPUT
     assert "not a note name" in err
     code, _, err = run(capsys, "init", "crack", "--tune", "C9")  # 8372 Hz is outside 40 … 4000 Hz
-    assert code == 2
+    assert code == BAD_INPUT
     assert "body.tune_hz" in err
 
 
-def test_render_and_extract(capsys: pytest.CaptureFixture[str], tmp_path: Path, example) -> None:
+def test_render_and_extract(capsys: pytest.CaptureFixture[str], tmp_path: Path, example: Path) -> None:
+    """Render a patch to a file whose samples are the render, and extract the patch from it again."""
     out = tmp_path / "snare.wav"
     code, text, _ = run(capsys, "render", example, "--out", out)
     assert code == 0
     assert "wrote" in text
     assert "F#3 +0.0 cents" in text
     data, rate = soundfile.read(out, dtype="float32")
-    assert rate == 48000
+    assert rate == RATE
     assert np.array_equal(data, render(loads(EXAMPLE))[0])
     code, text, _ = run(capsys, "extract", out)
     assert code == 0
     assert text == dumps(loads(EXAMPLE))
 
 
-def test_render_writes_round_robin_takes(capsys: pytest.CaptureFixture[str], tmp_path: Path, example) -> None:
+def test_render_writes_round_robin_takes(capsys: pytest.CaptureFixture[str], tmp_path: Path, example: Path) -> None:
+    """Write a set's takes as _rr files, each holding its own seed's patch, and refuse no takes."""
     out = tmp_path / "snare.wav"
-    code, text, _ = run(capsys, "render", example, "--out", out, "--takes", 3, "--level-match")
+    code, text, _ = run(capsys, "render", example, "--out", out, "--takes", TAKES, "--level-match")
     assert code == 0
     assert "3 takes sharing one gain" in text
     assert "level-matched" in text
-    audio, _ = render_takes(loads(EXAMPLE), 3, level_match=True)
+    audio, _ = render_takes(loads(EXAMPLE), TAKES, level_match=True)
     for j in (1, 2, 3):
         path = tmp_path / f"snare_rr{j}.wav"
         assert np.array_equal(soundfile.read(path, dtype="float32")[0], audio[j - 1])
@@ -77,86 +94,94 @@ def test_render_writes_round_robin_takes(capsys: pytest.CaptureFixture[str], tmp
         assert loads(run(capsys, "extract", path)[1]) == dataclasses.replace(loads(EXAMPLE), seed=j)
     assert not out.exists()
     code, _, err = run(capsys, "render", example, "--out", out, "--takes", 0)
-    assert code == 2
+    assert code == BAD_INPUT
     assert "--takes" in err
 
 
 def test_render_refuses_overs_unless_allowed(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    """Refuse a gain-mode render over full scale, saying what to lower, unless overs are allowed in float."""
     patch = tmp_path / "loud.toml"
-    patch.write_text(EXAMPLE.replace("db          = -6.0", "db          = 12.0"))
+    patch.write_text(EXAMPLE.replace("db          = -6.0", "db          = 12.0"), encoding="utf-8")
     out = tmp_path / "loud.wav"
-    code, text, err = run(capsys, "render", patch, "--out", out)
-    assert code == 1
+    code, _text, err = run(capsys, "render", patch, "--out", out)
+    assert code == REFUSED
     assert not out.exists()
     assert "not written" in err
     assert "Lower output.db by at least" in err
     code, _, _ = run(capsys, "render", patch, "--out", out, "--allow-over")
     assert code == 0
-    assert np.max(np.abs(wav.read(out).samples)) > 1.0
+    assert np.max(np.abs(wav.read(out).samples)) > 1
 
 
 def test_render_writes_pcm(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    """Write 24- and 16-bit PCM, never with overs, and refuse a PCM render over its ceiling."""
     for fmt, subtype in (("pcm24", "PCM_24"), ("pcm16", "PCM_16")):
         patch = tmp_path / f"{fmt}.toml"
-        patch.write_text(EXAMPLE.replace('"float32"     #', f'"{fmt}"       #'))
-        assert loads(patch.read_text()).output.format == fmt
+        patch.write_text(EXAMPLE.replace('"float32"     #', f'"{fmt}"       #'), encoding="utf-8")
+        assert loads(patch.read_text(encoding="utf-8")).output.format == fmt
         out = tmp_path / f"{fmt}.wav"
         code, text, _ = run(capsys, "render", patch, "--out", out)
         assert code == 0
         assert f"{fmt[3:]}-bit PCM" in text
         assert soundfile.info(out).subtype == subtype
-        assert loads(run(capsys, "extract", out)[1]) == loads(patch.read_text())
+        assert loads(run(capsys, "extract", out)[1]) == loads(patch.read_text(encoding="utf-8"))
         code, _, err = run(capsys, "render", patch, "--out", tmp_path / "x.wav", "--allow-over")
-        assert code == 2
+        assert code == BAD_INPUT
         assert "float32 only" in err
     loud = tmp_path / "loud.toml"
     loud.write_text(
         EXAMPLE.replace('"float32"     #', '"pcm24"       #').replace("db          = -6.0", "db          = 12.0"),
+        encoding="utf-8",
     )
     code, _, err = run(capsys, "render", loud, "--out", tmp_path / "loud.wav")
-    assert code == 1
+    assert code == REFUSED
     assert "not written" in err
     assert "ceiling" in err
     assert not (tmp_path / "loud.wav").exists()
 
 
 def test_errors_are_reported(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    """Report every problem of an invalid patch, a missing file, and a WAV with no patch in it."""
     bad = tmp_path / "bad.toml"
-    bad.write_text(EXAMPLE.replace("damping  = 1.0", "damping  = 4.0").replace("seed = 1", "seed = -1"))
+    invalid = EXAMPLE.replace("damping  = 1.0", "damping  = 4.0").replace("seed = 1", "seed = -1")
+    bad.write_text(invalid, encoding="utf-8")
     code, _, err = run(capsys, "render", bad, "--out", tmp_path / "x.wav")
-    assert code == 2
+    assert code == BAD_INPUT
     assert "body.damping: 4 is outside 0 … 3" in err
     assert "seed:" in err
     code, _, err = run(capsys, "render", tmp_path / "missing.toml", "--out", "x.wav")
-    assert code == 2
+    assert code == BAD_INPUT
     assert "missing.toml" in err
     other = tmp_path / "plain.wav"
     soundfile.write(other, np.zeros(10), 48000)
     code, _, err = run(capsys, "extract", other)
-    assert code == 2
+    assert code == BAD_INPUT
     assert "no embedded snare patch" in err
 
 
-def test_tune(capsys: pytest.CaptureFixture[str], example) -> None:
+def test_tune(capsys: pytest.CaptureFixture[str], example: Path) -> None:
+    """Retune a patch, refuse what is not a note, and refuse a tuning that would take a mode past 20 kHz."""
     code, out, _ = run(capsys, "tune", example, "D3")
     assert code == 0
     assert out == dumps(loads(out))
-    assert loads(out).body.tune_hz == 146.832
+    assert loads(out).body.tune_hz == D3
     code, _, err = run(capsys, "tune", example, "H9")
-    assert code == 2
+    assert code == BAD_INPUT
     assert "cannot tune to H9" in err
     assert "not a note name" in err
     # A mode that the glide would take past 20 kHz is refused, never clamped.
     high = example.with_name("high.toml")
-    high.write_text(EXAMPLE.replace("{ ratio = 2.136, level_db = -11.0 }", "{ ratio = 7.0,   level_db = -11.0 }"))
+    seventh = EXAMPLE.replace("{ ratio = 2.136, level_db = -11.0 }", "{ ratio = 7.0,   level_db = -11.0 }")
+    high.write_text(seventh, encoding="utf-8")
     assert run(capsys, "tune", high, "2400")[0] == 0
     code, _, err = run(capsys, "tune", high, "3000")
-    assert code == 2
+    assert code == BAD_INPUT
     assert "body.pitch[1].ratio" in err
     assert "for mode 3 is outside 10 Hz … 20 kHz" in err
 
 
-def test_stretch(capsys: pytest.CaptureFixture[str], example) -> None:
+def test_stretch(capsys: pytest.CaptureFixture[str], example: Path) -> None:
+    """Stretch every shape after its peak, or chosen curves after a time, and refuse what cannot be."""
     code, out, _ = run(capsys, "stretch", example, "all", "0.8")
     assert code == 0
     before, after = loads(EXAMPLE), loads(out)
@@ -164,56 +189,59 @@ def test_stretch(capsys: pytest.CaptureFixture[str], example) -> None:
     assert after.noise[1].amp[2][0] == pytest.approx(1.5 + 0.8 * 38.5)
     code, out, _ = run(capsys, "stretch", example, "body.pitch", "noise[1].amp", "2", "--after", "0.05")
     assert code == 0
-    assert loads(out).body.pitch[-1][0] == 29.95
-    assert loads(out).noise[0].amp[-1][0] == 15.95
+    assert loads(out).body.pitch[-1][0] == PITCH_END_MS
+    assert loads(out).noise[0].amp[-1][0] == STICK_END_MS
     code, _, err = run(capsys, "stretch", example, "body.amp", "0.000001")
-    assert code == 2
+    assert code == BAD_INPUT
     assert "repeats the previous knot time" in err
     code, _, err = run(capsys, "stretch", example, "noise[3].amp", "2")
-    assert code == 2
+    assert code == BAD_INPUT
     assert "not a curve of this patch" in err
 
 
-def test_bursts(capsys: pytest.CaptureFixture[str], example) -> None:
+def test_bursts(capsys: pytest.CaptureFixture[str], example: Path) -> None:
+    """Rewrite a layer as a clap train, and refuse too many bursts or a layer the patch lacks."""
     code, out, _ = run(capsys, "bursts", example, "noise[1]", "--count", 4, "--spacing", 11)
     assert code == 0
     knots = loads(out).noise[0].amp
-    assert len(knots) == 14
+    assert len(knots) == BURST_KNOTS
     assert knots[1] == (0.1, 1.0)
     assert knots[4] == (11.1, 1.0)
     code, _, err = run(capsys, "bursts", example, "noise[1]", "--count", 11, "--spacing", 11)
-    assert code == 2
+    assert code == BAD_INPUT
     assert "--count" in err
     code, _, err = run(capsys, "bursts", example, "noise[5]", "--count", 2, "--spacing", 11)
-    assert code == 2
+    assert code == BAD_INPUT
     assert "not a layer of this patch" in err
 
 
-def test_softer(capsys: pytest.CaptureFixture[str], example, tmp_path: Path) -> None:
+def test_softer(capsys: pytest.CaptureFixture[str], example: Path, tmp_path: Path) -> None:
+    """Print the same drum struck softer, by each rule or none, refusing too much, and composing."""
     code, out, _ = run(capsys, "softer", example, 12)
     assert code == 0
     q = loads(out)
-    assert q.body.level_db == -16.0
+    assert q.body.level_db == -4.0 - 12
     assert q.body.pitch[0] == (0.0, 1.005048)
-    assert q.noise[0].band_hz[1] == 12137.2
+    assert q.noise[0].band_hz[1] == round(16000 * 10 ** (-12 / 20 * 0.2), 1)
     code, out, _ = run(capsys, "softer", example, 12, "--glide", 0, "--contact", 0)
     assert code == 0
     assert loads(out).body.pitch == loads(EXAMPLE).body.pitch
     code, _, err = run(capsys, "softer", example, 90)
-    assert code == 2
+    assert code == BAD_INPUT
     assert "cannot make it 90 dB softer" in err
     assert "-94 is outside" in err
     # Softer layers compose: 6 then 6 is 12, up to the decimal rounding it writes.
     six = tmp_path / "six.toml"
-    six.write_text(run(capsys, "softer", example, 6)[1])
+    six.write_text(run(capsys, "softer", example, 6)[1], encoding="utf-8")
     twice = loads(run(capsys, "softer", six, 6)[1])
     assert twice.body.level_db == q.body.level_db
-    assert abs(twice.noise[0].band_hz[1] - q.noise[0].band_hz[1]) <= 0.2
+    assert abs(twice.noise[0].band_hz[1] - q.noise[0].band_hz[1]) <= 2 * 0.1  # two roundings to 0.1 Hz
 
 
 def test_the_report_explains_the_domain(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
+    """Find the driven reference's report naming its loudness, its cause and its drive headroom."""
     patch = tmp_path / "driven.toml"
-    patch.write_text(cli.reference_text("driven"))
+    patch.write_text(cli.reference_text("driven"), encoding="utf-8")
     code, text, _ = run(capsys, "render", patch, "--out", tmp_path / "d.wav")
     assert code == 0
     assert "LUFS" in text
@@ -221,7 +249,8 @@ def test_the_report_explains_the_domain(capsys: pytest.CaptureFixture[str], tmp_
     assert "drive headroom +" in text
 
 
-def test_verify(capsys: pytest.CaptureFixture[str], example) -> None:
+def test_verify(capsys: pytest.CaptureFixture[str], example: Path) -> None:
+    """Verify a patch and its takes against the reference."""
     code, out, _ = run(capsys, "verify", example)
     assert code == 0
     assert "PASS" in out
