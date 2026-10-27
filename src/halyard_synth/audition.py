@@ -25,47 +25,105 @@ audition stops. Nothing is ever resampled.
 
 from __future__ import annotations
 
+import importlib
 import math
 import os
 import random
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, NamedTuple, Protocol, TextIO, cast
 
 import numpy as np
 
 from . import wav
 from .loudness import momentary_max
 from .patch import PatchError, loads
-from .render import FORMATS, RenderError, db, quantize, render_takes
+from .render import FORMATS, RenderError, Report, db, quantize, render_takes
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+    from contextlib import AbstractContextManager
+
+    from numpy.typing import NDArray
+
+    type Floats = NDArray[np.float64]
+    type Audio = NDArray[np.float32]
+    type Fill = Callable[[int], Audio]
+    type Rendered = tuple[list[Audio], Report]
+    type Path_ = str | os.PathLike[str]
+
+    class Done(Protocol):
+        """What reports a finished render: its generation, its result or failure, its time, and if it is newest."""
+
+        def __call__(self, generation: int, result: object, elapsed: float, *, newest: bool) -> None:
+            """Report the render."""
+
 
 GAP_S = 0.5
 BAR_TOLERANCE_S = 0.001  # how far a bed may be from a whole number of bars
+BEATS_PER_BAR = 4
+STEREO = 2
+FAIR = 0.5  # a blind pair's chance of playing the render first
+POLL_S = 0.1  # how often the session looks at its files and its pairs
+# What a render can fail with: its own errors, and the lookup and type errors a bug would raise, so that a failed
+# render is reported and the watcher keeps watching.
+FAILURES = (ValueError, RuntimeError, OSError, ArithmeticError, MemoryError, LookupError, TypeError)
 
 
 class AuditionError(Exception):
-    pass
+    """An audition that cannot start, with what to change."""
 
 
-def load_audio(path) -> tuple[int, np.ndarray]:
-    """A float or PCM WAV as float64 frames × channels, never resampled."""
+class Tempo(NamedTuple):
+    """The beat grid: the tempo, and the beats of each 4/4 bar that hits land on."""
+
+    bpm: float
+    beats: tuple[int, ...] = (2, 4)
+
+
+@dataclass(frozen=True)
+class Settings:
+    """How an audition plays: watching, its tempo and beats, a bed, a sample to compare, blind, and takes."""
+
+    watch: bool = False
+    bpm: float | None = None
+    beats: tuple[int, ...] = (2, 4)
+    bed: Path_ | None = None
+    against: Path_ | None = None
+    blind: bool = False
+    takes: int = 1
+
+    @property
+    def tempo(self) -> Tempo | None:
+        """The beat grid, or None to repeat hits freely."""
+        return None if self.bpm is None else Tempo(self.bpm, self.beats)
+
+
+DEFAULTS = Settings()
+
+
+def load_audio(path: Path_) -> tuple[int, Floats]:
+    """Read a float or PCM WAV as float64 frames × channels, never resampled."""
     try:
         w = wav.read(path)
     except (OSError, ValueError) as e:
-        raise AuditionError(f"{path}: {e}") from None
+        msg = f"{path}: {e}"
+        raise AuditionError(msg) from None
     x = w.as_float()
-    return w.rate, x if x.ndim == 2 else x[:, None]
+    return w.rate, x if x.ndim == STEREO else x[:, None]
 
 
-def playable(audio: list[np.ndarray], report) -> list[np.ndarray]:
-    """What `render` writes, as float32: PCM formats add only their quantization."""
+def playable(audio: list[Audio], report: Report) -> list[Audio]:
+    """Return what `render` writes, as float32: PCM formats add only their quantization."""
     bits = FORMATS[report.format]
     if bits is None:
         return audio
     return [
-        (quantize(a, bits, t.seed) / float(2 ** (bits - 1))).astype(np.float32) for a, t in zip(audio, report.takes)
+        (quantize(a, bits, t.seed) / float(2 ** (bits - 1))).astype(np.float32)
+        for a, t in zip(audio, report.takes, strict=True)
     ]
 
 
@@ -77,18 +135,20 @@ class Bed:
     before the next start.
     """
 
-    def __init__(self, frames: np.ndarray, rate: int, bpm: float, bars: int):
+    def __init__(self, frames: Floats, rate: int, bpm: float, bars: int) -> None:
+        """Keep the bed's frames as float32, and its tempo grid."""
         self.frames = np.ascontiguousarray(frames, dtype=np.float32)
         self.channels = self.frames.shape[1]
         self.rate, self.bpm, self.bars = rate, bpm, bars
 
     def start(self, k: int) -> int:
-        return round(k * self.bars * 4 * self.rate * 60 / self.bpm)
+        """Return where loop k starts."""
+        return round(k * self.bars * BEATS_PER_BAR * self.rate * 60 / self.bpm)
 
-    def fill(self, clock: int, frames: int) -> np.ndarray:
-        """The bed over [clock, clock + frames), with the clock counted from the first bar."""
+    def fill(self, clock: int, frames: int) -> Audio:
+        """Return the bed over [clock, clock + frames), with the clock counted from the first bar."""
         out = np.zeros((frames, self.channels), dtype=np.float32)
-        k = max(0, int(clock // (self.bars * 4 * self.rate * 60 / self.bpm)) - 1)
+        k = max(0, int(clock // (self.bars * BEATS_PER_BAR * self.rate * 60 / self.bpm)) - 1)
         while self.start(k) < clock + frames:
             s, e = self.start(k), min(self.start(k + 1), self.start(k) + len(self.frames))
             a, b = max(clock, s), min(clock + frames, e)
@@ -109,18 +169,27 @@ class Hits:
     """
 
     def __init__(
-        self, rate: int, slots: int = 1, bpm: float | None = None, beats=(2, 4), *, bed: Bed | None = None, rng=None
-    ):
-        self.rate, self.bpm, self.beats, self.bed, self.rng = rate, bpm, tuple(beats), bed, rng
+        self,
+        rate: int,
+        slots: int = 1,
+        tempo: Tempo | None = None,
+        *,
+        bed: Bed | None = None,
+        rng: random.Random | None = None,
+    ) -> None:
+        """Start with no buffers: nothing plays until a slot is offered one."""
+        self.rate, self.bed, self.rng = rate, bed, rng
+        self.bpm: float | None = None if tempo is None else tempo.bpm
+        self.beats: tuple[int, ...] = (2, 4) if tempo is None else tuple(tempo.beats)
         self.channels = bed.channels if bed is not None else 1
-        self._offers: list[tuple | None] = [None] * slots
+        self._offers: list[tuple[int, list[Audio], Audio | None] | None] = [None] * slots
         self._lock = threading.Lock()
         self.generations = [-1] * slots
-        self.buffers: list[list[np.ndarray] | None] = [None] * slots
-        self.sample: np.ndarray | None = None
+        self.buffers: list[list[Audio] | None] = [None] * slots
+        self.sample: Audio | None = None
         self.played = [0] * slots  # hits per slot, which pick its take
         self.last_slot = -1
-        self.voices: list[tuple[int, np.ndarray]] = []  # (start sample, buffer)
+        self.voices: list[tuple[int, Audio]] = []  # (start sample, buffer)
         self.clock = 0  # index of the next output sample, counted from the first hit's bar
         self.started = False
         self.next_hit: int | None = None
@@ -131,9 +200,10 @@ class Hits:
 
     @property
     def generation(self) -> int:
+        """The generation of the first slot's buffers."""
         return self.generations[0]
 
-    def offer(self, slot: int, generation: int, buffers: list[np.ndarray], sample: np.ndarray | None = None) -> None:
+    def offer(self, slot: int, generation: int, buffers: Sequence[Audio], sample: Audio | None = None) -> None:
         """Queue a slot's take buffers, and the sample matched to them, for that slot's next hit.
 
         An older generation never replaces a newer one.
@@ -148,6 +218,7 @@ class Hits:
         return 0.0 if self.next_hit is None else max(0, self.next_hit - self.clock) / self.rate
 
     def _take_offers(self) -> None:
+        """Take every offer newer than its slot's buffers."""
         with self._lock:
             for i, offered in enumerate(self._offers):
                 if offered is not None and offered[0] > self.generations[i]:
@@ -155,35 +226,37 @@ class Hits:
                     if i == 0:
                         self.sample = offered[2]
 
-    def _hit_time(self, n: int) -> int:
-        """Where hit n starts: on the beat grid, counted from the first bar."""
+    def _hit_time(self, n: int, bpm: float) -> int:
+        """Return where hit n starts: on the beat grid, counted from the first bar."""
         per_bar = len(self.beats)
-        beat = (n // per_bar) * 4 + self.beats[n % per_bar] - 1
-        return round(beat * self.rate * 60 / self.bpm)
+        beat = (n // per_bar) * BEATS_PER_BAR + self.beats[n % per_bar] - 1
+        return round(beat * self.rate * 60 / bpm)
 
-    def _next_buffer(self) -> np.ndarray:
+    def _next_buffer(self) -> Audio:
+        """Return the buffer the next hit plays, and log it."""
         if self.sample is not None:
             if self.count % 2 == 0:
-                self.order.append(True if self.rng is None else self.rng.random() < 0.5)
+                self.order.append(True if self.rng is None else self.rng.random() < FAIR)
             if (self.count % 2 == 0) != self.order[-1]:
                 self.log.append((-1, 0))
                 return self.sample
         ready = [i for i, b in enumerate(self.buffers) if b]
         slot = next((i for i in ready if i > self.last_slot), ready[0])
         self.last_slot = slot
-        takes = self.buffers[slot]
+        takes = self.buffers[slot] or []  # a ready slot has takes
         take = self.played[slot] % len(takes)
         self.played[slot] += 1
         self.log.append((slot, take))
         return takes[take]
 
-    def fill(self, frames: int) -> np.ndarray:
+    def fill(self, frames: int) -> Audio:
+        """Mix the next `frames` output samples: the hits that start or still ring in them, and the bed."""
         if not self.started:
             self._take_offers()
             if not any(self.buffers):
                 return np.zeros(frames if self.channels == 1 else (frames, self.channels), dtype=np.float32)
             self.started = True
-            self.next_hit = self._hit_time(0) if self.bpm else 0
+            self.next_hit = self._hit_time(0, self.bpm) if self.bpm else 0
         out = np.zeros(frames, dtype=np.float32)
         end = self.clock + frames
         while self.next_hit is not None and self.next_hit < end:
@@ -192,7 +265,7 @@ class Hits:
             self.voices.append((self.next_hit, buf))
             self.count += 1
             if self.bpm:
-                self.next_hit = self._hit_time(self.count)
+                self.next_hit = self._hit_time(self.count, self.bpm)
             else:
                 self.next_hit += buf.size + round(GAP_S * self.rate)
         playing = []
@@ -216,14 +289,16 @@ class Watcher:
 
     def __init__(
         self,
-        path,
+        path: Path_,
         work: Callable[[str], object],
-        done: Callable[[int, object, float, bool], None],
+        done: Done,
         text: str | None = None,
-    ):
-        self.path, self.work, self.done = path, work, done
+    ) -> None:
+        """Watch a file, rendering with `work` and reporting to `done`; `text` is the version already rendered."""
+        self.path, self.work, self.done = Path(path), work, done
         self.generation = 0
-        self._stamp, self._text = None, text  # `text`: the version already rendered, if any
+        self._stamp: tuple[int, int] | None = None
+        self._text = text
         self._pending: tuple[int, str] | None = None
         self._cv = threading.Condition()
         threading.Thread(target=self._run, daemon=True).start()
@@ -231,12 +306,11 @@ class Watcher:
     def poll(self) -> None:
         """Start a new generation if the file's content changed."""
         try:
-            st = os.stat(self.path)
+            st = self.path.stat()
             stamp = (st.st_mtime_ns, st.st_size)
             if stamp == self._stamp:
                 return
-            with open(self.path, encoding="utf-8") as f:
-                text = f.read()
+            text = self.path.read_text(encoding="utf-8")
         except OSError:
             return
         self._stamp = stamp
@@ -246,12 +320,14 @@ class Watcher:
         self.request(text)
 
     def request(self, text: str) -> None:
+        """Render this text as a new generation."""
         with self._cv:
             self.generation += 1
             self._pending = (self.generation, text)  # an older request not yet started is superseded
             self._cv.notify()
 
     def _run(self) -> None:
+        """Render each pending request, and report it."""
         while True:
             with self._cv:
                 while self._pending is None:
@@ -261,16 +337,19 @@ class Watcher:
             start = time.perf_counter()
             try:
                 result = self.work(text)
-            except Exception as e:  # reported by `done`; the last valid buffer keeps playing
+            except FAILURES as e:  # reported by `done`; the last valid buffer keeps playing
                 result = e
             elapsed = time.perf_counter() - start
             with self._cv:
                 newest = generation == self.generation
-            self.done(generation, result, elapsed, newest)
+            self.done(generation, result, elapsed, newest=newest)
 
 
 class OverError(Exception):
-    def __init__(self, path, report):
+    """A first render over full scale, which audition cannot play."""
+
+    def __init__(self, path: Path, report: Report) -> None:
+        """Say how far over the render is, and what to lower."""
         super().__init__(f"{path}: over full scale by {db(report.peak):.2f} dB: lower output.db to audition it")
 
 
@@ -279,102 +358,117 @@ class Session:
 
     def __init__(
         self,
-        paths,
+        paths: Path_ | Sequence[Path_],
+        settings: Settings = DEFAULTS,
         *,
-        watch: bool = False,
-        bpm: float | None = None,
-        beats=(2, 4),
-        bed=None,
-        against=None,
-        blind: bool = False,
-        takes: int = 1,
-        rng=None,
-        out=None,
-    ):
-        out = out or sys.stdout
-        self.paths = [Path(p) for p in ([paths] if isinstance(paths, (str, Path)) else paths)]
-        self.out, self.takes, self.bpm = out, takes, bpm
-        if against is not None and len(self.paths) > 1:
-            raise AuditionError("--against compares one patch with a sample; give one patch")
-        if blind and against is None:
-            raise AuditionError("--blind needs --against: a blind comparison needs a sample")
-        if bed is not None and bpm is None:
-            raise AuditionError("--with needs --bpm, so the hits land on the bed's beats")
+        rng: random.Random | None = None,
+        out: TextIO | None = None,
+    ) -> None:
+        """Render every patch, load the bed and the sample, and start a watcher per patch."""
+        self.paths = [Path(p) for p in ([paths] if isinstance(paths, (str, os.PathLike)) else paths)]
+        self.out, self.takes, self.bpm = out or sys.stdout, settings.takes, settings.bpm
+        if settings.against is not None and len(self.paths) > 1:
+            msg = "--against compares one patch with a sample; give one patch"
+            raise AuditionError(msg)
+        if settings.blind and settings.against is None:
+            msg = "--blind needs --against: a blind comparison needs a sample"
+            raise AuditionError(msg)
+        if settings.bed is not None and settings.bpm is None:
+            msg = "--with needs --bpm, so the hits land on the bed's beats"
+            raise AuditionError(msg)
         texts = [self._text(p) for p in self.paths]
-        first = self._render(texts[0])
-        audio, report = first
+        audio, report = self._render(texts[0])
         self._say(0, None, str(report))
         if report.over:
             raise OverError(self.paths[0], report)
         self.rate = report.sample_rate
-        self.bed = self._bed(bed, bpm) if bed is not None else None
-        self.sample, self.sample_lufs = self._sample(against) if against is not None else (None, None)
-        self.blind = blind
-        self.hits = Hits(
-            self.rate, len(self.paths), bpm, beats, bed=self.bed, rng=(rng or random.SystemRandom()) if blind else None
+        self.bed = (
+            self._bed(settings.bed, settings.bpm) if settings.bed is not None and settings.bpm is not None else None
         )
-        self.buffers: list[list[np.ndarray] | None] = [None] * len(self.paths)
-        for note in self._accept(0, 0, audio, report):
-            print(note, file=self.out)
+        self.sample: Floats | None = None
+        self.sample_lufs = -math.inf
+        if settings.against is not None:
+            self.sample, self.sample_lufs = self._sample(settings.against)
+        self.blind = settings.blind
+        self.hits = Hits(
+            self.rate,
+            len(self.paths),
+            settings.tempo,
+            bed=self.bed,
+            rng=(rng or random.SystemRandom()) if settings.blind else None,
+        )
+        self.buffers: list[list[Audio] | None] = [None] * len(self.paths)
+        self.out.write("".join(f"{note}\n" for note in self._accept(0, 0, audio, report)))
         self._pairs_said = 0
         self.watchers = [
-            Watcher(p, self._render, self._done_for(i), t) for i, (p, t) in enumerate(zip(self.paths, texts))
+            Watcher(p, self._render, self._done_for(i), t)
+            for i, (p, t) in enumerate(zip(self.paths, texts, strict=True))
         ]
         # The first patch plays as soon as it is ready; the others render behind it.
         for i, text in enumerate(texts[1:], 1):
             self.watchers[i].request(text)
-        self.watch = watch
+        self.watch = settings.watch
 
     def _text(self, path: Path) -> str:
+        """Read a patch file's text."""
         try:
             return path.read_text(encoding="utf-8")
         except OSError as e:
-            raise AuditionError(f"{path}: {e.strerror}") from None
+            msg = f"{path}: {e.strerror}"
+            raise AuditionError(msg) from None
 
-    def _render(self, text: str):
+    def _render(self, text: str) -> Rendered:
+        """Render a patch's takes as they would be written."""
         audio, report = render_takes(loads(text), self.takes)
         return playable(audio, report), report
 
     def _say(self, slot: int, generation: int | None, message: str) -> None:
+        """Report about a slot, tagged by its file and its generation."""
         if generation is None:
             tag = "" if len(self.paths) == 1 else f"{self.paths[slot].name}\n"
-            print(tag + message, file=self.out)
+            self.out.write(f"{tag}{message}\n")
             return
         tag = f"[{generation}]" if len(self.paths) == 1 else f"[{self.paths[slot].name} {generation}]"
-        print(f"{tag} {message}", file=self.out)
+        self.out.write(f"{tag} {message}\n")
 
-    def _bed(self, path, bpm) -> Bed:
+    def _bed(self, path: Path_, bpm: float) -> Bed:
+        """Load a bed: at the render's rate, mono or stereo, a whole number of bars at the tempo."""
         rate, frames = load_audio(path)
         if rate != self.rate:
-            raise AuditionError(f"{path}: {rate} Hz, but the patch renders at {self.rate} Hz; audition never resamples")
-        if frames.shape[1] > 2:
-            raise AuditionError(f"{path}: {frames.shape[1]} channels; a bed must be mono or stereo")
-        bar = self.rate * 4 * 60 / bpm
+            msg = f"{path}: {rate} Hz, but the patch renders at {self.rate} Hz; audition never resamples"
+            raise AuditionError(msg)
+        if frames.shape[1] > STEREO:
+            msg = f"{path}: {frames.shape[1]} channels; a bed must be mono or stereo"
+            raise AuditionError(msg)
+        bar = self.rate * BEATS_PER_BAR * 60 / bpm
         bars = round(frames.shape[0] / bar)
         if bars < 1 or abs(frames.shape[0] - bars * bar) > BAR_TOLERANCE_S * self.rate:
-            raise AuditionError(
+            msg = (
                 f"{path}: {frames.shape[0] / bar:.3f} bars at {bpm:g} bpm; "
                 "a bed must be within 1 ms of a whole number of bars"
             )
-        print(
+            raise AuditionError(msg)
+        self.out.write(
             f"{'bed':<9}{path}: {bars} bar{'s' if bars > 1 else ''} at {bpm:g} bpm, "
-            f"{'stereo' if frames.shape[1] == 2 else 'mono'}",
-            file=self.out,
+            f"{'stereo' if frames.shape[1] == STEREO else 'mono'}\n",
         )
         return Bed(frames, self.rate, bpm, bars)
 
-    def _sample(self, path) -> tuple[np.ndarray, float]:
+    def _sample(self, path: Path_) -> tuple[Floats, float]:
+        """Load the sample to compare against, at the render's rate, as its mid channel, and its loudness."""
         rate, frames = load_audio(path)
         if rate != self.rate:
-            raise AuditionError(f"{path}: {rate} Hz, but the patch renders at {self.rate} Hz; audition never resamples")
-        mid = frames.mean(axis=1)  # a stereo sample plays as its mid channel
+            msg = f"{path}: {rate} Hz, but the patch renders at {self.rate} Hz; audition never resamples"
+            raise AuditionError(msg)
+        mid: Floats = frames.mean(axis=1)  # a stereo sample plays as its mid channel
         level = momentary_max(mid, rate)
         if level == -math.inf:
-            raise AuditionError(f"{path}: the sample is silent")
+            msg = f"{path}: the sample is silent"
+            raise AuditionError(msg)
         return mid, level
 
-    def _matched(self, report) -> tuple[np.ndarray | None, list[str]]:
-        """The sample matched to this render's loudness (its first take's), and what to say about it."""
+    def _matched(self, report: Report) -> tuple[Audio | None, list[str]]:
+        """Return the sample matched to this render's loudness (its first take's), and what to say about it."""
         if self.sample is None:
             return None, []
         loud = report.takes[0].loudness
@@ -386,32 +480,33 @@ class Session:
             if peak > 1.0
             else ""
         )
-        return matched, [
+        note = (
             f"{'sample':<9}plays at {gain:+.1f} dB, matched to the render's loudness "
             f"(the largest 400 ms momentary loudness, BS.1770){clip}"
-        ]
+        )
+        return matched, [note]
 
     def _mix_warning(self) -> str | None:
-        """Whether the hits, with the bed under them, would clip the device over one pattern."""
+        """Warn if the hits, with the bed under them, would clip the device over one pattern."""
         if not self.bpm or not any(self.buffers):
             return None
-        probe = Hits(self.rate, len(self.buffers), self.bpm, self.hits.beats, bed=self.bed)
+        probe = Hits(self.rate, len(self.buffers), Tempo(self.bpm, self.hits.beats), bed=self.bed)
         for i, b in enumerate(self.buffers):
             if b:
                 probe.offer(i, 0, b)
         longest = max(x.size for b in self.buffers if b for x in b)
-        span = (self.bed.start(1) if self.bed is not None else round(2 * 4 * self.rate * 60 / self.bpm)) + longest
+        bars = round(2 * BEATS_PER_BAR * self.rate * 60 / self.bpm)
+        span = (self.bed.start(1) if self.bed is not None else bars) + longest
         total = sum(len(b) for b in self.buffers if b)
         peak = float(np.max(np.abs(probe.fill(span * max(1, total)))))
         if peak <= 1.0:
             return None
         under = "over the bed " if self.bed is not None else ""
-        return f"warning: the hits {under}peak at {db(peak):+.1f} dBFS, which the device will clip; lower " + (
-            "the bed or output.db" if self.bed is not None else "output.db"
-        )
+        lower = "the bed or output.db" if self.bed is not None else "output.db"
+        return f"warning: the hits {under}peak at {db(peak):+.1f} dBFS, which the device will clip; lower {lower}"
 
-    def _accept(self, slot: int, generation: int, audio, report) -> list[str]:
-        """Offer a render to its slot; returns what to say about the sample and the mix."""
+    def _accept(self, slot: int, generation: int, audio: list[Audio], report: Report) -> list[str]:
+        """Offer a render to its slot, and return what to say about the sample and the mix."""
         matched, notes = self._matched(report) if slot == 0 else (None, [])
         self.buffers[slot] = audio
         self.hits.offer(slot, generation, audio, matched)
@@ -419,6 +514,7 @@ class Session:
         return notes + ([warning] if warning else [])
 
     def poll(self) -> None:
+        """Look at the files when watching, and name each blind pair as it starts."""
         if self.watch:
             for w in self.watchers:
                 w.poll()
@@ -426,110 +522,104 @@ class Session:
             started = (self.hits.count + 1) // 2
             while self._pairs_said < started:
                 self._pairs_said += 1
-                print(f"pair {self._pairs_said}", file=self.out)
+                self.out.write(f"pair {self._pairs_said}\n")
 
     def reveal(self) -> str | None:
-        """The blind order, once audition stops: R is the render, S the sample."""
+        """Return the blind order, once audition stops: R is the render, S the sample."""
         if not self.blind:
             return None
         pairs = " ".join(f"{i + 1}:{'RS' if first else 'SR'}" for i, first in enumerate(self.hits.order))
         return f"blind order (R = render, S = sample): {pairs or 'no pair played'}"
 
-    def _done_for(self, slot: int):
-        def done(generation, result, elapsed, newest) -> None:
-            say = lambda msg: self._say(slot, generation, msg)  # noqa: E731
-            if not newest:
-                say("dropped: a newer edit is rendering")
-            elif isinstance(result, PatchError):
-                say(f"invalid patch, still playing the last valid one:\n{result}")
-            elif isinstance(result, (RenderError, Exception)):
-                say(f"render failed, still playing the last valid one: {result}")
-            else:
-                audio, report = result
-                if report.over:
-                    say(
-                        f"over full scale by {db(report.peak):.2f} dB; lower output.db. "
-                        "Still playing the last valid buffer."
-                    )
-                elif report.sample_rate != self.rate:
-                    say(
-                        f"sample rate {report.sample_rate} Hz, but audition plays at {self.rate} Hz; restart audition "
-                        "to hear it. Still playing the last valid buffer."
-                    )
-                else:
-                    notes = self._accept(slot, generation, audio, report)
-                    say("\n".join([f"rendered in {1000 * elapsed:.0f} ms; plays at its next hit", str(report), *notes]))
+    def _done_for(self, slot: int) -> Done:
+        """Return what reports a finished render of a slot, and offers it when it is the newest and playable."""
+
+        def done(generation: int, result: object, elapsed: float, *, newest: bool) -> None:
+            self._say(slot, generation, self._outcome(slot, generation, result, elapsed, newest=newest))
 
         return done
 
+    def _outcome(self, slot: int, generation: int, result: object, elapsed: float, *, newest: bool) -> str:
+        """Say what became of a finished render, offering it to its slot when it can play."""
+        if not newest:
+            return "dropped: a newer edit is rendering"
+        if isinstance(result, PatchError):
+            return f"invalid patch, still playing the last valid one:\n{result}"
+        if isinstance(result, BaseException):
+            return f"render failed, still playing the last valid one: {result}"
+        audio, report = cast("Rendered", result)
+        if report.over:
+            return f"over full scale by {db(report.peak):.2f} dB; lower output.db. Still playing the last valid buffer."
+        if report.sample_rate != self.rate:
+            return (
+                f"sample rate {report.sample_rate} Hz, but audition plays at {self.rate} Hz; restart audition "
+                "to hear it. Still playing the last valid buffer."
+            )
+        notes = self._accept(slot, generation, audio, report)
+        return "\n".join([f"rendered in {1000 * elapsed:.0f} ms; plays at its next hit", str(report), *notes])
+
 
 def audition(
-    paths,
+    paths: Path_ | Sequence[Path_],
+    settings: Settings = DEFAULTS,
     *,
-    watch: bool = False,
-    bpm: float | None = None,
-    beats=(2, 4),
-    bed=None,
-    against=None,
-    blind: bool = False,
-    takes: int = 1,
-    out=None,
-    stream_factory=None,
-    rng=None,
+    out: TextIO | None = None,
+    stream_factory: Callable[[int, int, Fill], AbstractContextManager[object]] | None = None,
+    rng: random.Random | None = None,
 ) -> int:
-    """Play the patches until interrupted; with `watch`, re-render on every edit."""
-    out = out or sys.stdout
+    """Play the patches until interrupted; with `settings.watch`, re-render on every edit."""
+    report = out or sys.stdout
     try:
-        session = Session(
-            paths,
-            watch=watch,
-            bpm=bpm,
-            beats=beats,
-            bed=bed,
-            against=against,
-            blind=blind,
-            takes=takes,
-            rng=rng,
-            out=out,
-        )
+        session = Session(paths, settings, rng=rng, out=report)
     except PatchError as e:
-        print("invalid patch\n" + "\n".join(f"  {m}" for m in e.problems), file=sys.stderr)
+        sys.stderr.write("invalid patch\n" + "".join(f"  {m}\n" for m in e.problems))
         return 2
     except (AuditionError, RenderError) as e:
-        print(e, file=sys.stderr)
+        sys.stderr.write(f"{e}\n")
         return 2
     except OverError as e:
-        print(e, file=sys.stderr)
+        sys.stderr.write(f"{e}\n")
         return 1
     try:
-        stream = (stream_factory or _sounddevice_stream)(session.rate, session.hits.channels, session.hits.fill)
+        stream = (stream_factory or device_stream)(session.rate, session.hits.channels, session.hits.fill)
     except RuntimeError as e:
-        print(e, file=sys.stderr)
+        sys.stderr.write(f"{e}\n")
         return 1
     try:
         with stream:
             while True:
-                time.sleep(0.1)
+                time.sleep(POLL_S)
                 session.poll()
     except KeyboardInterrupt:
         return 0
     finally:
         revealed = session.reveal()
         if revealed:
-            print(revealed, file=out)
+            report.write(f"{revealed}\n")
 
 
-def _sounddevice_stream(rate: int, channels: int, fill):
+def device_stream(rate: int, channels: int, fill: Fill) -> AbstractContextManager[object]:
+    """Open an output stream at exactly `rate` that plays what `fill` mixes, or say why the device cannot."""
     try:
-        import sounddevice as sd
+        # Imported here: importing sounddevice starts PortAudio, which only audition needs.
+        sd = importlib.import_module("sounddevice")
     except (ImportError, OSError) as e:
-        raise RuntimeError(f"audition needs the sounddevice package and PortAudio ({e})") from None
+        msg = f"audition needs the sounddevice package and PortAudio ({e})"
+        raise RuntimeError(msg) from None
     try:
         sd.check_output_settings(samplerate=rate, channels=channels, dtype="float32")
-    except Exception as e:
-        raise RuntimeError(f"the output device does not support {rate} Hz ({e}); audition never resamples") from None
+    except (ValueError, sd.PortAudioError) as e:
+        msg = f"the output device does not support {rate} Hz ({e}); audition never resamples"
+        raise RuntimeError(msg) from None
 
-    def callback(outdata, frames, _time, _status):
+    def callback(outdata: Audio, frames: int, _time: object, _status: object) -> None:
+        """Fill the device's buffer with the next frames."""
         outdata[:] = fill(frames).reshape(frames, channels)
 
-    return sd.OutputStream(samplerate=rate, channels=channels, dtype="float32", callback=callback)
+    stream: AbstractContextManager[object] = sd.OutputStream(
+        samplerate=rate,
+        channels=channels,
+        dtype="float32",
+        callback=callback,
+    )
+    return stream

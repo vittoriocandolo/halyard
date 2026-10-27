@@ -18,9 +18,15 @@ updating every 100 ms can only approach from below.
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.signal import resample_poly, sosfilt
+
+if TYPE_CHECKING:
+    from numpy.typing import ArrayLike, NDArray
+
+    type Floats = NDArray[np.float64]
 
 SHELF_HZ, SHELF_DB, SHELF_Q = 1681.974450955533, 3.999843853973347, 0.7071752369554196
 SHELF_VB = 0.4996667741545416  # the shelf's mid-band exponent
@@ -29,8 +35,8 @@ WINDOW_S = 0.4
 OFFSET = -0.691
 
 
-def k_weighting(rate: int) -> np.ndarray:
-    """The two K-weighting biquads at `rate`, as second-order sections."""
+def k_weighting(rate: int) -> Floats:
+    """Return the two K-weighting biquads at `rate`, as second-order sections."""
     k = math.tan(math.pi * SHELF_HZ / rate)
     vh = 10.0 ** (SHELF_DB / 20.0)
     vb = vh**SHELF_VB
@@ -49,8 +55,8 @@ def k_weighting(rate: int) -> np.ndarray:
     return np.array([shelf, highpass])
 
 
-def momentary_max(x: np.ndarray, rate: int) -> float:
-    """The largest 400 ms momentary loudness in LUFS, over every window position; −inf for silence.
+def momentary_max(x: ArrayLike, rate: int) -> float:
+    """Return the largest 400 ms momentary loudness in LUFS, over every window position; −inf for silence.
 
     The signal is silent before and after the file, so windows that run past
     its end are counted, and a hit shorter than the window reads as its whole
@@ -63,7 +69,7 @@ def momentary_max(x: np.ndarray, rate: int) -> float:
     return OFFSET + 10.0 * math.log10(ms) if ms > 0 else -math.inf
 
 
-def true_peak(audio: np.ndarray) -> float:
-    """A 4× oversampled peak estimate (information only)."""
+def true_peak(audio: ArrayLike) -> float:
+    """Return a 4× oversampled peak estimate (information only)."""
     x = np.concatenate((np.asarray(audio, dtype=float), np.zeros(32)))
     return max(float(np.max(np.abs(resample_poly(x, 4, 1)))), float(np.max(np.abs(audio), initial=0.0)))

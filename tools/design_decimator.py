@@ -6,8 +6,8 @@
 The renderer never designs filters: it loads these coefficients and checks
 their SHA-256. Run this only to change the rendering policy.
 
-    python tools/design_decimator.py            # write the shipped designs
-    python tools/design_decimator.py --check    # compare a fresh design with the shipped data
+    uv run python -m tools.design_decimator            # write the shipped designs
+    uv run python -m tools.design_decimator --check    # compare a fresh design with the shipped data
 
 Design: a Kaiser-window linear-phase prototype at 116 dB, converted to minimum
 phase by SciPy's full-length, magnitude-matching homomorphic method with a

@@ -8,12 +8,13 @@ import time
 
 import numpy as np
 import pytest
-from conftest import EXAMPLE
 
 from halyard_synth import audition as A
 from halyard_synth.loudness import momentary_max
 from halyard_synth.patch import loads
 from halyard_synth.render import quantize, render, render_takes
+
+from .conftest import EXAMPLE
 
 RATE = 1000  # a toy rate keeps the hit arithmetic readable
 
@@ -68,7 +69,7 @@ def test_block_size_never_moves_a_hit():
     buf = np.random.default_rng(0).normal(size=333).astype(np.float32)
     outs = []
     for block in (1, 7, 64, 1000, 4096):
-        hits = A.Hits(RATE, bpm=97.0)
+        hits = A.Hits(RATE, tempo=A.Tempo(97.0))
         hits.offer(0, 0, [buf])
         outs.append(play(hits, 5000, block))
     for o in outs[1:]:
@@ -97,31 +98,31 @@ def test_older_generations_never_replace_newer_ones():
 
 def test_the_backbeat_by_default_and_other_beats_on_request():
     # At 120 bpm a beat is 500 samples and a bar 2000: the snare lands on beats 2 and 4.
-    hits = A.Hits(RATE, bpm=120.0)
+    hits = A.Hits(RATE, tempo=A.Tempo(120.0))
     hits.offer(0, 0, [ones(1)])
     assert np.array_equal(np.flatnonzero(play(hits, 8000, 333)), [500, 1500, 2500, 3500, 4500, 5500, 6500, 7500])
-    hits = A.Hits(RATE, bpm=120.0, beats=(1, 2, 3, 4))
+    hits = A.Hits(RATE, tempo=A.Tempo(120.0, (1, 2, 3, 4)))
     hits.offer(0, 0, [ones(1)])
     assert np.array_equal(np.flatnonzero(play(hits, 3000, 256)), [0, 500, 1000, 1500, 2000, 2500])
-    hits = A.Hits(RATE, bpm=120.0, beats=(3,))  # half time
+    hits = A.Hits(RATE, tempo=A.Tempo(120.0, (3,)))  # half time
     hits.offer(0, 0, [ones(1)])
     assert np.array_equal(np.flatnonzero(play(hits, 6000, 999)), [1000, 3000, 5000])
 
 
 def test_overlapping_tails_sum_and_the_grid_never_drifts():
-    hits = A.Hits(RATE, bpm=120.0, beats=(1, 2, 3, 4))
+    hits = A.Hits(RATE, tempo=A.Tempo(120.0, (1, 2, 3, 4)))
     hits.offer(0, 0, [ones(900)])
     out = play(hits, 2000, 128)
     assert np.all(out[:500] == 1) and np.all(out[500:900] == 2) and np.all(out[900:1000] == 1)
     # Fractional beat lengths never drift: beat b starts at round(b · rate · 60 / bpm).
-    hits = A.Hits(RATE, bpm=140.0, beats=(1, 2, 3, 4))
+    hits = A.Hits(RATE, tempo=A.Tempo(140.0, (1, 2, 3, 4)))
     hits.offer(0, 0, [ones(1)])
     out = play(hits, 20000, 333)
     assert np.array_equal(np.flatnonzero(out), [round(i * RATE * 60 / 140) for i in range(47)])
 
 
 def test_patches_cycle_hit_by_hit_and_takes_cycle_within_each():
-    hits = A.Hits(RATE, 2, bpm=120.0, beats=(1, 2, 3, 4))
+    hits = A.Hits(RATE, 2, A.Tempo(120.0, (1, 2, 3, 4)))
     hits.offer(0, 0, [ones(1, 1.0), ones(1, 2.0)])
     hits.offer(1, 0, [ones(1, 10.0), ones(1, 20.0), ones(1, 30.0)])
     out = play(hits, 6000, 250)
@@ -131,7 +132,7 @@ def test_patches_cycle_hit_by_hit_and_takes_cycle_within_each():
 
 
 def test_the_first_patch_plays_while_the_others_render():
-    hits = A.Hits(RATE, 2, bpm=120.0, beats=(1, 2, 3, 4))
+    hits = A.Hits(RATE, 2, A.Tempo(120.0, (1, 2, 3, 4)))
     hits.offer(0, 0, [ones(1, 1.0)])
     early = play(hits, 1500, 100)
     hits.offer(1, 0, [ones(1, 5.0)])
@@ -149,7 +150,7 @@ def test_a_bed_loops_under_the_hits_on_the_tempo_grid():
     snare = ones(10, 0.5)
     outs = []
     for block in (1, 64, 333, 4096):
-        hits = A.Hits(RATE, bpm=bpm, bed=A.Bed(bed, RATE, bpm, 2))
+        hits = A.Hits(RATE, tempo=A.Tempo(bpm), bed=A.Bed(bed, RATE, bpm, 2))
         hits.offer(0, 0, [snare])
         outs.append(play(hits, 12000, block))
     for o in outs[1:]:
@@ -162,7 +163,7 @@ def test_a_bed_loops_under_the_hits_on_the_tempo_grid():
 
 def test_a_bed_a_little_short_of_whole_bars_never_drifts():
     bed = np.ones((3999, 1), dtype=np.float32)  # one sample short of two bars at 120 bpm
-    hits = A.Hits(RATE, bpm=120.0, bed=A.Bed(bed, RATE, 120.0, 2))
+    hits = A.Hits(RATE, tempo=A.Tempo(120.0), bed=A.Bed(bed, RATE, 120.0, 2))
     hits.offer(0, 0, [np.zeros(1, dtype=np.float32)])
     out = play(hits, 12000, 256)
     # Each loop restarts on the grid: the missing sample is a gap at the end of every period.
@@ -171,7 +172,7 @@ def test_a_bed_a_little_short_of_whole_bars_never_drifts():
 
 def test_a_stereo_bed_opens_a_stereo_stream_with_the_snare_centred():
     bed = np.stack([np.full(2000, 0.1), np.full(2000, -0.1)], axis=1).astype(np.float32)
-    hits = A.Hits(RATE, bpm=120.0, bed=A.Bed(bed, RATE, 120.0, 1))
+    hits = A.Hits(RATE, tempo=A.Tempo(120.0), bed=A.Bed(bed, RATE, 120.0, 1))
     snare = np.linspace(0, 1, 50, dtype=np.float32)
     hits.offer(0, 0, [snare])
     out = play(hits, 4000, 100)
@@ -191,7 +192,7 @@ def test_hits_alternate_between_the_render_and_the_sample():
 
 
 def test_blind_pairs_play_in_the_recorded_random_order():
-    hits = A.Hits(RATE, bpm=120.0, beats=(1, 2, 3, 4), rng=random.Random(7))
+    hits = A.Hits(RATE, tempo=A.Tempo(120.0, (1, 2, 3, 4)), rng=random.Random(7))
     hits.offer(0, 0, [ones(10, 1.0)], ones(10, 2.0))
     out = play(hits, 500 * 40, 128)
     played = [out[500 * i] for i in range(40)]
@@ -237,7 +238,7 @@ def test_pcm_patches_play_their_quantized_samples(tmp_path):
 
 def test_takes_cycle_in_a_session(example):
     audio, _ = render_takes(loads(EXAMPLE), 3)
-    session = A.Session(example, takes=3, out=Collect([]))
+    session = A.Session(example, A.Settings(takes=3), out=Collect([]))
     period = audio[0].size + 24000
     heard = np.concatenate([session.hits.fill(4800) for _ in range(40)])
     for j in range(3):
@@ -250,7 +251,7 @@ def test_several_patches_render_behind_the_first(tmp_path, example):
     other.write_text(EXAMPLE.replace("tune_hz  = 185.0", "tune_hz  = 220.0"))
     first, _ = render(loads(EXAMPLE))
     second, _ = render(loads(other.read_text()))
-    session = A.Session([example, other], bpm=120.0, beats=(1, 2, 3, 4), out=Collect([]))
+    session = A.Session([example, other], A.Settings(bpm=120.0, beats=(1, 2, 3, 4)), out=Collect([]))
     wait_for(lambda: session.buffers[1] is not None)
     heard = np.concatenate([session.hits.fill(4800) for _ in range(20)])
     assert np.array_equal(heard[: first.size], first)  # beat 1: the first patch
@@ -335,7 +336,7 @@ def test_watcher_renders_only_the_newest_version(tmp_path):
 
 def test_watching_swaps_buffers_and_keeps_the_last_valid_one(example):
     log = []
-    session = A.Session(example, watch=True, out=Collect(log))
+    session = A.Session(example, A.Settings(watch=True), out=Collect(log))
     original = session.hits.fill(48000 // 2)  # the first hit starts playing
     assert session.hits.generation == 0
 
@@ -367,7 +368,7 @@ def test_a_session_matches_the_sample_and_plays_over_the_bed(tmp_path, example):
     sample = write_wav(tmp_path / "sample.wav", np.stack([other, other * 0.5], axis=1) * 0.3, 48000, "PCM_24")
     bed = write_wav(tmp_path / "bed.wav", np.full((96000, 2), 0.01), 48000)  # one bar at 120 bpm, stereo
     log = []
-    session = A.Session(example, bpm=120.0, bed=bed, against=sample, out=Collect(log))
+    session = A.Session(example, A.Settings(bpm=120.0, bed=bed, against=sample), out=Collect(log))
     text = "".join(log)
     assert "bed      " in text and "1 bar at 120 bpm, stereo" in text and "sample   plays at" in text
     assert session.hits.channels == 2
@@ -382,7 +383,7 @@ def test_the_sample_is_rematched_on_every_re_render(tmp_path, example):
     other, _ = render(loads(EXAMPLE.replace("tune_hz  = 185.0", "tune_hz  = 230.0")))
     sample = write_wav(tmp_path / "sample.wav", other, 48000)
     log = []
-    session = A.Session(example, watch=True, against=sample, out=Collect(log))
+    session = A.Session(example, A.Settings(watch=True, against=sample), out=Collect(log))
     before = session.hits._offers[0][2]
     quieter = EXAMPLE.replace("db          = -6.0", "db          = -18.0")
     edit(example, quieter)
@@ -408,12 +409,12 @@ def test_a_session_refuses_what_it_cannot_play_faithfully(tmp_path, example):
         ({"against": tmp_path / "missing.wav"}, "missing.wav"),
     ):
         with pytest.raises(A.AuditionError, match=message):
-            A.Session(example, out=Collect([]), **kwargs)
+            A.Session(example, A.Settings(**kwargs), out=Collect([]))
     with pytest.raises(A.AuditionError, match="give one patch"):
-        A.Session([example, example], against=silent, out=Collect([]))
+        A.Session([example, example], A.Settings(against=silent), out=Collect([]))
     # 0.5 ms off whole bars is within tolerance.
     close = write_wav(tmp_path / "close.wav", np.full((96000 + 24, 1), 0.01), 48000)
-    A.Session(example, bpm=120.0, bed=close, out=Collect([]))
+    A.Session(example, A.Settings(bpm=120.0, bed=close), out=Collect([]))
 
 
 def test_audition_reveals_the_blind_order_when_it_stops(tmp_path, example):
@@ -432,9 +433,7 @@ def test_audition_reveals_the_blind_order_when_it_stops(tmp_path, example):
         def __exit__(self, *exc):
             return False
 
-    code = A.audition(
-        [example], bpm=120.0, against=sample, blind=True, stream_factory=Stream, out=Collect(log), rng=random.Random(3)
-    )
+    code = A.audition([example], A.Settings(bpm=120.0, against=sample, blind=True), stream_factory=Stream, out=Collect(log), rng=random.Random(3))
     text = "".join(log)
     assert code == 0 and "blind order (R = render, S = sample): 1:" in text
     assert text.count(":RS") + text.count(":SR") == 3  # six hits on the backbeat in six seconds: three pairs
@@ -444,14 +443,14 @@ def test_clipping_is_flagged(tmp_path, example):
     loud = write_wav(tmp_path / "loud.wav", np.full((96000, 1), 0.9), 48000)
     quiet = write_wav(tmp_path / "quiet.wav", np.full((96000, 1), 0.01), 48000)
     log = []
-    A.Session(example, bpm=120.0, bed=loud, out=Collect(log))
+    A.Session(example, A.Settings(bpm=120.0, bed=loud), out=Collect(log))
     assert "warning: the hits over the bed peak at" in "".join(log)
     log = []
-    A.Session(example, bpm=120.0, bed=quiet, out=Collect(log))
+    A.Session(example, A.Settings(bpm=120.0, bed=quiet), out=Collect(log))
     assert "warning" not in "".join(log)
     # A quiet sample matched to a loud render would clip the device.
     other, _ = render(loads(EXAMPLE.replace("tune_hz  = 185.0", "tune_hz  = 230.0")))
     faint = write_wav(tmp_path / "faint.wav", other * 0.01 + np.pad([0.5], (0, other.size - 1)), 48000)
     log = []
-    A.Session(example, against=faint, out=Collect(log))
+    A.Session(example, A.Settings(against=faint), out=Collect(log))
     assert "which the device will clip" in "".join(log)

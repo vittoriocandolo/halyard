@@ -11,7 +11,7 @@ the loudness spread of takes 1–8. The acceptance criteria are:
   * loudness matched within 1 dB across the references, peaks below −1 dBFS;
   * a loudness spread of at most 1 dB over takes 1–8, with level matching where flagged.
 
-    python tools/references.py [--k 32] [--seeds 16]
+    uv run python -m tools.references [--k 32] [--seeds 16]
 """
 
 from __future__ import annotations
@@ -20,14 +20,11 @@ import argparse
 import dataclasses
 import math
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from halyard_synth.cli import REFERENCES, reference_text  # noqa: E402
-from halyard_synth.loudness import momentary_max  # noqa: E402
-from halyard_synth.patch import loads  # noqa: E402
-from halyard_synth.render import K, cause_of, db, domain, drive_headroom, output_stage, synthesize  # noqa: E402
+from halyard_synth.cli import REFERENCES, reference_text
+from halyard_synth.loudness import momentary_max
+from halyard_synth.patch import loads
+from halyard_synth.render import K, cause_of, db, domain, drive_headroom, output_stage, synthesize
 
 
 def measure(name: str, k: int, seeds: int) -> dict:

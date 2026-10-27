@@ -7,10 +7,11 @@ from importlib import resources
 
 import numpy as np
 import pytest
-from conftest import make
 from scipy.signal import upfirdn
 
 from halyard_synth import render as R
+
+from .conftest import make
 
 # (base, K, taps, length in ms, 99% of the energy within, in ms), as plan §3 records them.
 FILTERS = [

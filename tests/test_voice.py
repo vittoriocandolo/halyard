@@ -6,13 +6,14 @@ import math
 
 import numpy as np
 import pytest
-from conftest import EXAMPLE, make
 from scipy.optimize import least_squares
 
 from halyard_synth import noise
 from halyard_synth import voice as V
 from halyard_synth.curve import amplitude_curve, compressed, pitch_curve
 from halyard_synth.patch import loads
+
+from .conftest import EXAMPLE, make
 
 RATE = 1536000  # 48 kHz at 32×
 

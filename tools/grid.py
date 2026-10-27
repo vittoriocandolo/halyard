@@ -8,9 +8,9 @@ at 128 × base (6.144 MHz for the 48 kHz family), whose convergence is checked
 against 256 × base, and against 512 × base on a subset. The results fix the
 internal rate and the constant of the validated-domain rule.
 
-    python tools/grid.py run --k 32 [--family NAME ...] [--out docs/grid/k32.csv]
-    python tools/grid.py analyze docs/grid/k16.csv docs/grid/k32.csv
-    python tools/grid.py list [--family NAME]
+    uv run python -m tools.grid run --k 32 [--family NAME ...] [--out docs/grid/k32.csv]
+    uv run python -m tools.grid analyze docs/grid/k16.csv docs/grid/k32.csv
+    uv run python -m tools.grid list [--family NAME]
 
 A run appends to its CSV and skips fixtures already there, so it can resume.
 """
@@ -32,12 +32,11 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
-from halyard_synth import cli  # noqa: E402
-from halyard_synth import patch as P  # noqa: E402
-from halyard_synth.reference import compare, reference  # noqa: E402
-from halyard_synth.render import LIMIT, QUIET, SATURATION, synthesize  # noqa: E402
+from halyard_synth import cli
+from halyard_synth import patch as P
+from halyard_synth.reference import compare, reference
+from halyard_synth.render import LIMIT, QUIET, SATURATION, synthesize
 
 INF = math.inf
 FLOOR = 1e-7
@@ -276,7 +275,7 @@ def fixtures():
         for spacing in (1, 5, 30):
             for rise in (0.01, 0.1, 1.0):
                 try:
-                    shape = P.bursts(base, "noise[2]", count, float(spacing), rise=rise, tail=40.0).noise[1].amp
+                    shape = P.bursts(base, "noise[2]", P.Train(count, float(spacing), rise=rise, tail=40.0)).noise[1].amp
                 except P.PatchError:
                     continue
                 for drive in (0, 18):
@@ -306,13 +305,10 @@ def fixtures():
                 )
             ),
             "noise[1]",
-            4,
-            10.0,
+            P.Train(4, 10.0),
         ),
         "noise[2]",
-        3,
-        12.0,
-        start=4.0,
+        P.Train(3, 12.0, start=4.0),
     )
     for drive in (0, 12, 24):
         add(
@@ -507,7 +503,7 @@ def run(args) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     done = set()
     if out.exists():
-        done = {(r["family"], r["name"]) for r in csv.DictReader(open(out))}
+        done = {(r["family"], r["name"]) for r in csv.DictReader(Path(out).read_text(encoding="utf-8").splitlines())}
     jobs = [
         (fam, name, edits, args.k, i % 10 == 0 and fam != "longest")
         for i, (fam, name, edits) in enumerate(todo)
@@ -518,7 +514,7 @@ def run(args) -> None:
     print(f"{len(jobs)} fixtures to run at K = {args.k} ({len(done)} already in {out})", flush=True)
     start = time.perf_counter()
     fresh = not out.exists()
-    with open(out, "a", newline="") as f, ProcessPoolExecutor(max_workers=args.workers) as pool:
+    with Path(out).open("a", newline="", encoding="utf-8") as f, ProcessPoolExecutor(max_workers=args.workers) as pool:
         w = csv.DictWriter(f, FIELDS)
         if fresh:
             w.writeheader()
@@ -531,7 +527,7 @@ def run(args) -> None:
 
 
 def load(path, saturation: float = SATURATION) -> list[dict]:
-    rows = list(csv.DictReader(open(path)))
+    rows = list(csv.DictReader(Path(path).read_text(encoding="utf-8").splitlines()))
     for r in rows:
         for key in FIELDS[2:-1]:
             r[key] = float(r[key]) if r.get(key) not in (None, "") else math.nan

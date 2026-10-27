@@ -6,13 +6,14 @@ import math
 
 import numpy as np
 import pytest
-from conftest import EXAMPLE, make
 
 from halyard_synth import cli
 from halyard_synth import render as R
 from halyard_synth import voice as V
 from halyard_synth.loudness import momentary_max
 from halyard_synth.patch import loads
+
+from .conftest import EXAMPLE, make
 
 
 def amp(*points):

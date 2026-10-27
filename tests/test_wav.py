@@ -9,17 +9,18 @@ import warnings
 import numpy as np
 import pytest
 import soundfile
-from conftest import EXAMPLE, make
 from scipy.io import wavfile
 
 from halyard_synth import __version__, cli, noise, wav
 from halyard_synth import render as R
 from halyard_synth.patch import dumps, loads
 
+from .conftest import EXAMPLE, make
+
 
 def walk(path):
     """An independent chunk walker: (id, size, payload, offset) in file order."""
-    data = open(path, "rb").read()
+    data = path.read_bytes()
     assert data[:4] == b"RIFF" and data[8:12] == b"WAVE"
     assert struct.unpack_from("<I", data, 4)[0] == len(data) - 8
     pos, out = 12, []
@@ -143,13 +144,13 @@ def test_riff_padding(tmp_path):
     for text in ("x", "xy", "π"):
         path = tmp_path / "pad.wav"
         samples = np.linspace(-1, 1, 7, dtype=np.float32)
-        wav.write(path, samples, 44100, meta={"patch": text})
+        wav.write(path, samples, wav.Format(44100), meta={"patch": text})
         chunks = walk(path)
         private = next(c for c in chunks if c[0] == b"snar")
         data = next(c for c in chunks if c[0] == b"data")
         assert data[3] % 2 == 0
         if private[1] % 2:
-            raw = open(path, "rb").read()
+            raw = path.read_bytes()
             assert raw[private[3] + 8 + private[1]] == 0
         assert np.array_equal(soundfile.read(path, dtype="float32")[0], samples)
         assert wav.read(path).meta == {"patch": text}
@@ -175,11 +176,11 @@ def test_reads_beds_and_samples_but_rejects_other_formats(tmp_path):
             wav.read(path)
         assert b"fmt " in wav.chunks(path)
     with pytest.raises(ValueError):
-        wav.write(tmp_path / "x.wav", np.zeros(4), 48000)  # float64 is not a format
+        wav.write(tmp_path / "x.wav", np.zeros(4), wav.Format(48000))  # float64 is not a format
     with pytest.raises(ValueError):
-        wav.write(tmp_path / "x.wav", np.zeros(4, dtype=np.int32), 48000, bits=20)
+        wav.write(tmp_path / "x.wav", np.zeros(4, dtype=np.int32), wav.Format(48000, 20))
     with pytest.raises(ValueError):
-        wav.write(tmp_path / "x.wav", np.array([2**15], dtype=np.int32), 48000, bits=16)  # out of range
+        wav.write(tmp_path / "x.wav", np.array([2**15], dtype=np.int32), wav.Format(48000, 16))  # out of range
 
 
 def test_every_rate_writes_a_valid_file(tmp_path):
@@ -223,7 +224,7 @@ def test_pcm_exports_read_back_exactly(tmp_path, fmt, bits, subtype):
     }
     # The same patch writes the same bytes again.
     export(tmp_path / "again.wav", p)
-    assert open(path, "rb").read() == open(tmp_path / "again.wav", "rb").read()
+    assert path.read_bytes() == (tmp_path / "again.wav").read_bytes()
 
 
 def test_exact_zeros_stay_zero():
@@ -236,7 +237,7 @@ def test_exact_zeros_stay_zero():
 def test_24_bit_packing_round_trips(tmp_path):
     values = np.array([-(2**23), 2**23 - 1, -1, 0, 1, 12345, -54321, 2**22], dtype=np.int32)
     path = tmp_path / "pack.wav"
-    wav.write(path, values, 48000, bits=24)
+    wav.write(path, values, wav.Format(48000, 24))
     assert np.array_equal(wav.read(path).samples, values)
     assert np.array_equal(soundfile.read(path, dtype="int32")[0] >> 8, values)
 

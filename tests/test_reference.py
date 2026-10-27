@@ -5,11 +5,12 @@ import math
 
 import numpy as np
 import pytest
-from conftest import EXAMPLE, make
 
 from halyard_synth import reference as REF
 from halyard_synth.patch import loads
 from halyard_synth.render import synthesize
+
+from .conftest import EXAMPLE, make
 
 
 def amp(*pts):

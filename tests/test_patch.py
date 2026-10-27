@@ -6,11 +6,12 @@ import math
 
 import numpy as np
 import pytest
-from conftest import EXAMPLE, make
 
 from halyard_synth import patch as P
 from halyard_synth.curve import amplitude_curve, pitch_curve
 from halyard_synth.patch import PatchError, dumps, from_dict, loads
+
+from .conftest import EXAMPLE, make
 
 
 def problems(fn, *args, **kwargs):
@@ -465,7 +466,7 @@ def test_stretch_failures():
 
 def test_bursts_write_a_clap_train():
     p = loads(EXAMPLE)
-    q = P.bursts(p, "noise[1]", 4, 11.0)
+    q = P.bursts(p, "noise[1]", P.Train(4, 11.0))
     knots = q.noise[0].amp
     assert len(knots) == 3 * 4 + 2
     assert knots[0] == (0.0, 0.0)
@@ -484,18 +485,18 @@ def test_bursts_write_a_clap_train():
 
 def test_burst_options():
     p = loads(EXAMPLE)
-    q = P.bursts(p, "noise[2]", 3, 10.0, start=2.0, growth=1.5, rise=0.2, dip=0.25, taper=0.5, tail=50.0)
+    q = P.bursts(p, "noise[2]", P.Train(3, 10.0, start=2.0, growth=1.5, rise=0.2, dip=0.25, taper=0.5, tail=50.0))
     knots = q.noise[1].amp
     assert len(knots) == 3 * 3 + 3
     assert knots[:2] == ((0.0, 0.0), (2.0, 0.0))
     assert [knots[2 + 3 * i] for i in range(3)] == [(2.2, 1.0), (12.2, 0.5), (27.2, 0.25)]  # gaps 10, then 15
     assert [knots[4 + 3 * i] for i in range(2)] == [(12.0, 0.125), (27.0, 0.0625)]  # dips under the lower peak
     assert knots[-1] == (77.2, 0.0)
-    rising = P.bursts(p, "noise[2]", 3, 10.0, taper=2.0).noise[1].amp
+    rising = P.bursts(p, "noise[2]", P.Train(3, 10.0, taper=2.0)).noise[1].amp
     assert [rising[1 + 3 * i][1] for i in range(3)] == [0.25, 0.5, 1.0]
-    single = P.bursts(p, "noise[1]", 1, 10.0).noise[0].amp
+    single = P.bursts(p, "noise[1]", P.Train(1, 10.0)).noise[0].amp
     assert len(single) == 5 and single[1] == (0.1, 1.0)
-    silent_dips = P.bursts(p, "noise[1]", 2, 10.0, dip=0.0).noise[0].amp
+    silent_dips = P.bursts(p, "noise[1]", P.Train(2, 10.0, dip=0.0)).noise[0].amp
     assert silent_dips[3] == (10.0, 0.0)
 
 
@@ -513,7 +514,7 @@ def test_burst_shapes_are_ordinary_valid_shapes():
             tail=float(rng.uniform(1, 300)),
         )
         try:
-            q = P.bursts(p, "noise[1]", n, float(rng.uniform(1, 30)), **kwargs)
+            q = P.bursts(p, "noise[1]", P.Train(n, float(rng.uniform(1, 30)), **kwargs))
         except PatchError as e:
             # The only acceptable failures: too many knots, a rise that does not fit, or too long a train.
             assert all("knots" in m or "--rise" in m or ".ms:" in m for m in e.problems), e.problems
@@ -531,9 +532,9 @@ def test_burst_shapes_are_ordinary_valid_shapes():
 
 def test_burst_failures():
     p = loads(EXAMPLE)
-    assert problems(P.bursts, p, "noise[3]", 4, 10.0)[0].startswith("noise[3]: not a layer of this patch")
-    assert problems(P.bursts, p, "noise[1]", 11, 10.0) == ["--count: needs 1 to 10 bursts, found 11"]
-    assert problems(P.bursts, p, "noise[1]", 0, 10.0) == ["--count: needs 1 to 10 bursts, found 0"]
+    assert problems(P.bursts, p, "noise[3]", P.Train(4, 10.0))[0].startswith("noise[3]: not a layer of this patch")
+    assert problems(P.bursts, p, "noise[1]", P.Train(11, 10.0)) == ["--count: needs 1 to 10 bursts, found 11"]
+    assert problems(P.bursts, p, "noise[1]", P.Train(0, 10.0)) == ["--count: needs 1 to 10 bursts, found 0"]
     for option, value in (
         ("rise", 0.005),
         ("dip", 1.0),
@@ -544,13 +545,13 @@ def test_burst_failures():
         ("tail", 0.3),
         ("rise", math.nan),
     ):
-        assert problems(P.bursts, p, "noise[1]", 4, 10.0, **{option: value})[0].startswith(f"--{option}:")
-    assert problems(P.bursts, p, "noise[1]", 4, 0.0)[0].startswith("--spacing:")
-    assert problems(P.bursts, p, "noise[1]", 4, 1.0, rise=0.9)[0].startswith("--rise: burst 1 rises for 0.9 ms")
-    assert problems(P.bursts, p, "noise[1]", 10, 5.0, start=1.0) == [
+        assert problems(P.bursts, p, "noise[1]", P.Train(4, 10.0, **{option: value}))[0].startswith(f"--{option}:")
+    assert problems(P.bursts, p, "noise[1]", P.Train(4, 0.0))[0].startswith("--spacing:")
+    assert problems(P.bursts, p, "noise[1]", P.Train(4, 1.0, rise=0.9))[0].startswith("--rise: burst 1 rises for 0.9 ms")
+    assert problems(P.bursts, p, "noise[1]", P.Train(10, 5.0, start=1.0)) == [
         "noise[1].amp: 10 bursts need 33 knots, more than the 32 allowed"
     ]
-    make_long = problems(P.bursts, p, "noise[1]", 10, 100.0, tail=200.0)
+    make_long = problems(P.bursts, p, "noise[1]", P.Train(10, 100.0, tail=200.0))
     assert any(m.startswith("noise[1].amp[") and "outside 0 … 1000" in m for m in make_long)
 
 
@@ -611,7 +612,7 @@ def close(p, q):
 
 def test_softer_composes():
     p = loads(EXAMPLE)
-    clap = P.bursts(p, "noise[1]", 4, 11.0)
+    clap = P.bursts(p, "noise[1]", P.Train(4, 11.0))
     for base in (p, clap):
         for a, b in ((6, 6), (3, 9), (12, 12), (0.5, 20)):
             close(P.softer(P.softer(base, a), b), P.softer(base, a + b))
@@ -620,7 +621,7 @@ def test_softer_composes():
 def test_softer_rules_are_exact_on_the_whole_curve():
     # Each segment of a rewritten shape is the original segment read at a linearly mapped time,
     # and the glide's excess scales on the whole curve, not only at its knots.
-    p = P.bursts(loads(EXAMPLE), "noise[1]", 4, 11.0)
+    p = P.bursts(loads(EXAMPLE), "noise[1]", P.Train(4, 11.0))
     for db in (6, 12, 24, 36):
         q = P.softer(p, db)
         for old, new in zip((p.body.amp, *[n.amp for n in p.noise]), (q.body.amp, *[n.amp for n in q.noise])):

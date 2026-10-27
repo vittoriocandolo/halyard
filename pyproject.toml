@@ -20,16 +20,56 @@ audition = ["sounddevice>=0.5"]
 halyard = "halyard_synth.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=9.1", "soundfile>=0.14"]
+dev = ["coverage>=7.17", "hatchling>=1.32", "mypy>=2.4", "pytest>=9.1", "ruff>=0.17", "soundfile>=0.14", "typos>=1.51", "zizmor>=1.31"]
 
 [tool.uv]
 required-version = ">=0.13"
 
+[tool.mypy]
+files = ["src", "tests", "tools"]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+enable_error_code = [
+    "deprecated",
+    "exhaustive-match",
+    "explicit-override",
+    "ignore-without-code",
+    "mutable-override",
+    "possibly-undefined",
+    "redundant-expr",
+    "redundant-self",
+    "truthy-bool",
+    "truthy-iterable",
+    "unimported-reveal",
+    "unused-awaitable",
+]
+
+[[tool.mypy.overrides]]
+module = ["scipy.*", "sounddevice", "soundfile"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+strict = true
+filterwarnings = ["error"]
 markers = [
     "slow: long-running checks (reference renders of long patches)",
 ]
 
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D203",  # contradicts D211: no blank line before a class docstring
+    "D213",  # contradicts D212: a multi-line docstring's summary starts on its first line
+]
+allowed-confusables = ["×", "−", "–", "α", "γ", "ρ", "σ", "′"]  # math notation
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # pytest checks with assert, and rewrites it so that it also runs under python -O
+
+[tool.ruff.lint.flake8-copyright]
+notice-rgx = '(?m)^# Copyright \(C\) \d{4}(-\d{4})? .+\n# SPDX-License-Identifier: GPL-3\.0-or-later$'  # the copyright line, then the license identifier

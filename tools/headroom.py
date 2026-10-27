@@ -12,8 +12,8 @@ bracket with full renders. With --dense it also scans every 0.05 dB up to
 the edge on fixtures whose edge is within 6 dB, to show that no status
 change hides between the candidates.
 
-    python tools/headroom.py run [--out docs/grid/headroom.csv] [--dense]
-    python tools/headroom.py analyze docs/grid/headroom.csv
+    uv run python -m tools.headroom run [--out docs/grid/headroom.csv] [--dense]
+    uv run python -m tools.headroom analyze docs/grid/headroom.csv
 
 A run appends to its CSV and skips fixtures already there, so it can resume.
 """
@@ -32,11 +32,9 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import grid  # noqa: E402
-
-from halyard_synth.patch import from_dict  # noqa: E402
-from halyard_synth.render import DRIVE_MAX, HEADROOM_STEP_DB, _drives, domain, render, synthesize  # noqa: E402
+from halyard_synth.patch import from_dict
+from halyard_synth.render import DRIVE_MAX, HEADROOM_STEP_DB, _drives, domain, render, synthesize
+from tools import grid
 
 FIELDS = ["family", "name", "drive", "inside", "estimate", "reference", "error", "dense", "renders", "seconds", "edits"]
 BISECT = 16  # halvings of a candidate bracket: 0.5 dB / 2¹⁶ ≈ 10⁻⁵ dB
@@ -121,12 +119,12 @@ def run_one(args) -> dict:
 def run(args) -> None:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    done = {(r["family"], r["name"]) for r in csv.DictReader(open(out))} if out.exists() else set()
+    done = {(r["family"], r["name"]) for r in csv.DictReader(Path(out).read_text(encoding="utf-8").splitlines())} if out.exists() else set()
     jobs = [(fam, name, edits, args.dense) for fam, name, edits in grid.fixtures() if (fam, name) not in done]
     print(f"{len(jobs)} fixtures to run ({len(done)} already in {out})", flush=True)
     start = time.perf_counter()
     fresh = not out.exists()
-    with open(out, "a", newline="") as f, ProcessPoolExecutor(max_workers=args.workers) as pool:
+    with Path(out).open("a", newline="", encoding="utf-8") as f, ProcessPoolExecutor(max_workers=args.workers) as pool:
         w = csv.DictWriter(f, FIELDS)
         if fresh:
             w.writeheader()
@@ -139,7 +137,7 @@ def run(args) -> None:
 
 
 def load(path) -> list[dict]:
-    rows = list(csv.DictReader(open(path)))
+    rows = list(csv.DictReader(Path(path).read_text(encoding="utf-8").splitlines()))
     for r in rows:
         for key in ("drive", "estimate", "reference", "error", "dense", "seconds"):
             r[key] = float(r[key])

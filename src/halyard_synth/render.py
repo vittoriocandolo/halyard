@@ -29,6 +29,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from importlib import resources
+from typing import TYPE_CHECKING, Any, NamedTuple, override
 
 import numpy as np
 import scipy
@@ -53,6 +54,13 @@ from .voice import (
     voice,
 )
 
+if TYPE_CHECKING:
+    from numpy.typing import ArrayLike, NDArray
+
+    from .voice import Tables
+
+    type Floats = NDArray[np.float64]
+
 K = 32  # frozen by the adversarial grid: at 16× the crack reference keeps only 1.7 dB of drive headroom (plan §3)
 FAMILY = {44100: 44100, 88200: 44100, 48000: 48000, 96000: 48000}
 
@@ -75,16 +83,17 @@ FORMATS = {"float32": None, "pcm24": 24, "pcm16": 16}
 
 
 class RenderError(RuntimeError):
-    pass
+    """A render that cannot be made as asked."""
 
 
 def ceiling(fmt: str) -> float:
-    """The largest sample a format takes: full scale for float, and 2 LSB below it for PCM, so dither never clips."""
+    """Return the largest sample a format takes: full scale for float, 2 LSB below it for PCM, so dither never clips."""
     bits = FORMATS[fmt]
     return 1.0 if bits is None else 1.0 - 2.0 ** (2 - bits)
 
 
 def db(x: float) -> float:
+    """Return x in dB, or −inf for 0."""
     return 20 * math.log10(x) if x > 0 else -math.inf
 
 
@@ -93,21 +102,28 @@ def db(x: float) -> float:
 
 @dataclass(frozen=True)
 class Decimator:
+    """A frozen decimator: its family's base rate, its factor K, its taps, their checksum and its stopband."""
+
     base: int
     k: int
-    taps: np.ndarray
+    taps: Floats
     sha256: str
     stopband_db: float
 
 
-def manifest() -> dict:
-    return json.loads(resources.files("halyard_synth").joinpath("data", "decimators.json").read_text())
+def manifest() -> dict[str, Any]:
+    """Return the shipped decimators' manifest: each one's file, size, checksum and stopband."""
+    data: dict[str, Any] = json.loads(
+        resources.files("halyard_synth").joinpath("data", "decimators.json").read_text(encoding="utf-8"),
+    )
+    return data
 
 
-def load_taps(raw: bytes, entry: dict) -> np.ndarray:
-    """Coefficients from their shipped bytes, refused unless they match the checksum."""
+def load_taps(raw: bytes, entry: dict[str, Any]) -> Floats:
+    """Return the coefficients from their shipped bytes, refused unless they match the checksum."""
     if hashlib.sha256(raw).hexdigest() != entry["sha256"] or len(raw) != 8 * entry["taps"]:
-        raise RenderError(f"decimator {entry['base']}x{entry['K']} does not match its checksum")
+        msg = f"decimator {entry['base']}x{entry['K']} does not match its checksum"
+        raise RenderError(msg)
     taps = np.frombuffer(raw, dtype="<f8").astype(float)
     taps.flags.writeable = False
     return taps
@@ -115,30 +131,32 @@ def load_taps(raw: bytes, entry: dict) -> np.ndarray:
 
 @functools.cache
 def decimator(base: int, k: int = K) -> Decimator:
-    """A frozen decimator from halyard_synth/data, verified against its checksum."""
+    """Return a frozen decimator from halyard_synth/data, verified against its checksum."""
     entry = manifest()["filters"][f"{base}x{k}"]
     raw = resources.files("halyard_synth").joinpath("data", entry["file"]).read_bytes()
     return Decimator(base, k, load_taps(raw, entry), entry["sha256"], entry["stopband_db"])
 
 
-def decimate(taps: np.ndarray, y: np.ndarray, factor: int, workers: int | None = None) -> np.ndarray:
-    """upfirdn(taps, y, down=factor), computed in parallel chunks that match it bit for bit.
+def decimate(taps: Floats, y: Floats, factor: int, workers: int | None = None) -> Floats:
+    """Return upfirdn(taps, y, down=factor), computed in parallel chunks that match it bit for bit.
 
     Each output of upfirdn is one sequential sum over its own inputs. A chunk is
     given every input its outputs need, starting on the factor's grid, so each
     output is computed by exactly the same operations as in a single call.
     """
-    L = taps.size
-    n_out = (y.size + L - 2) // factor + 1
+    length = taps.size
+    n_out = (y.size + length - 2) // factor + 1
     workers = min(workers or os.cpu_count() or 1, max(1, n_out // 4096))
     if workers == 1:
-        return upfirdn(taps, y, down=factor)
+        whole: Floats = upfirdn(taps, y, down=factor)
+        return whole
     edges = [round(i * n_out / workers) for i in range(workers + 1)]
 
-    def chunk(m0: int, m1: int) -> np.ndarray:
-        start = max(0, (m0 * factor - (L - 1)) // factor * factor)
+    def chunk(m0: int, m1: int) -> Floats:
+        """Return outputs m0 … m1 − 1, from every input they need."""
+        start = max(0, (m0 * factor - (length - 1)) // factor * factor)
         stop = y.size if m1 == n_out else (m1 - 1) * factor + 1
-        out = upfirdn(taps, y[start:stop], down=factor)
+        out: Floats = upfirdn(taps, y[start:stop], down=factor)
         return out[m0 - start // factor : m1 - start // factor]
 
     with ThreadPoolExecutor(workers) as pool:
@@ -146,7 +164,7 @@ def decimate(taps: np.ndarray, y: np.ndarray, factor: int, workers: int | None =
 
 
 def rates(sample_rate: int, k: int = K) -> tuple[int, int]:
-    """(internal rate F, decimation factor) for an export rate."""
+    """Return (internal rate F, decimation factor) for an export rate."""
     base = FAMILY[sample_rate]
     return base * k, k * base // sample_rate
 
@@ -171,10 +189,11 @@ class Probes:
     kept once over their union.
     """
 
-    x: np.ndarray  # the saturator input over the union of the windows
-    windows: tuple  # per probe: (offset into x, the taps that weight its samples)
+    x: Floats  # the saturator input over the union of the windows
+    windows: tuple[tuple[int, Floats], ...]  # per probe: (offset into x, the taps that weight its samples)
 
-    def peak(self, alphas) -> np.ndarray:
+    def peak(self, alphas: ArrayLike) -> Floats:
+        """Return the largest output among the probes at each α."""
         a = np.atleast_1d(np.asarray(alphas, dtype=float))
         out = np.empty(a.size)
         for i in range(0, a.size, 32):  # bounded temporaries
@@ -188,7 +207,7 @@ class Probes:
 class Synthesis:
     """Everything before the output stage, at unity gain, for one take."""
 
-    out: np.ndarray
+    out: Floats
     rate: int
     factor: int
     source_samples: int
@@ -200,8 +219,8 @@ class Synthesis:
     probes: Probes | None = field(default=None, compare=False, repr=False)
 
 
-def _loudest(mags: np.ndarray, first: int, n: int, taken: list[int]) -> list[int]:
-    """Up to n indices of the largest nonzero values, apart from each other and from `taken`."""
+def _loudest(mags: Floats, first: int, n: int, taken: list[int]) -> list[int]:
+    """Return up to n indices of the largest nonzero values, apart from each other and from `taken`."""
     picked: list[int] = []
     for i in np.argsort(mags)[::-1][:256]:
         m = first + int(i)
@@ -212,9 +231,20 @@ def _loudest(mags: np.ndarray, first: int, n: int, taken: list[int]) -> list[int
     return picked
 
 
-def _probes(
-    v: Voice, rate: int, factor: int, taps: np.ndarray, count: int, out: np.ndarray, slew: Slew, tabs
-) -> Probes | None:
+class Grid(NamedTuple):
+    """A take's internal grid: its voice, the internal rate, the factor, the taps, its samples and its tables."""
+
+    v: Voice
+    rate: int
+    factor: int
+    taps: Floats
+    samples: int
+    tabs: Tables
+
+
+def _probes(g: Grid, out: Floats, slew: Slew) -> Probes | None:
+    """Choose the probes for a render, and keep the saturator's input under their windows."""
+    v, rate, factor, taps, count, tabs = g
     picked = _loudest(np.abs(out), 0, PROBES, [])
     # The output just after the crest without drive, and just after the steepest crossing at full drive,
     # computed exactly from x (the decimator's delay at low frequencies is a few outputs).
@@ -230,7 +260,7 @@ def _probes(
         near = upfirdn(taps, y, down=factor)[m0 - n0 // factor : m1 - n0 // factor]
         picked += _loudest(np.abs(near), m0, PROBES, picked)
     # out[m] = Σ_n h[mK − n] · y[n] over the internal samples 0 ≤ n < count that the filter reaches.
-    spans = []
+    spans: list[tuple[int, int, int]] = []
     for m in picked:
         top = m * factor
         n0, n1 = max(0, top - taps.size + 1), min(top, count - 1) + 1
@@ -244,7 +274,9 @@ def _probes(
             merged[-1][1] = max(merged[-1][1], n1)
         else:
             merged.append([n0, n1])
-    xs, where, pos = [], [], 0
+    xs: list[Floats] = []
+    where: list[tuple[int, int, int]] = []
+    pos = 0
     for n0, n1 in merged:
         xs.append(sources(v, rate, n0, n1, tabs))
         where.append((n0, n1, pos))
@@ -257,8 +289,8 @@ def _probes(
     return Probes(np.concatenate(xs), tuple(windows))
 
 
-def synthesize(p: Patch, *, k: int = K, taps: np.ndarray | None = None) -> Synthesis:
-    """The take that p's seed names, at unity gain, with everything the domain rule needs."""
+def synthesize(p: Patch, *, k: int = K, taps: Floats | None = None) -> Synthesis:
+    """Return the take that p's seed names, at unity gain, with everything the domain rule needs."""
     v = voice(p)
     rate, factor = rates(p.output.sample_rate, k)
     if taps is None:
@@ -279,7 +311,7 @@ def synthesize(p: Patch, *, k: int = K, taps: np.ndarray | None = None) -> Synth
         kink_bound(kinks, v.alpha, rate, band),
         v.alpha,
         band,
-        _probes(v, rate, factor, taps, n, out, slew, tabs),
+        _probes(Grid(v, rate, factor, taps, n, tabs), out, slew),
     )
 
 
@@ -288,29 +320,35 @@ def synthesize(p: Patch, *, k: int = K, taps: np.ndarray | None = None) -> Synth
 
 @dataclass(frozen=True)
 class Domain:
+    """The validated-domain rule on one take: its predicted aliasing, what it allows and the output peak."""
+
     predicted: float  # predicted aliasing error, at unity gain
     allowed: float
     peak: float
 
     @property
     def inside(self) -> bool:
+        """Whether the predicted error is within what the rule allows."""
         return self.predicted <= self.allowed
 
     @property
     def margin_db(self) -> float:
+        """How far the prediction lies under what is allowed, in dB; negative outside."""
         return db(self.allowed / self.predicted) if self.predicted else math.inf
 
     @property
     def predicted_db(self) -> float:
-        """Relative to the peak."""
+        """The predicted error relative to the peak."""
         return db(self.predicted / self.peak) if self.peak else -math.inf
 
 
 def allowed(peak: float) -> float:
+    """Return the error the rule allows at an output peak: −100 dB of it, or the floor when near-silent."""
     return LIMIT * peak if peak >= QUIET else FLOOR
 
 
 def domain(s: Synthesis) -> Domain:
+    """Judge a take by the validated-domain rule."""
     peak = float(np.max(np.abs(s.out), initial=0.0))
     q = s.slew.knee(s.alpha)
     saturation = SATURATION * math.exp(-(math.pi**2) / q) * peak if q else 0.0
@@ -329,17 +367,19 @@ class Cause:
 
     @property
     def dominant(self) -> str | None:
+        """Which term is larger, saturation or kinks; None when neither predicts any."""
         if not (self.saturation or self.kinks):
             return None
         return "saturation" if self.saturation >= self.kinks else "kinks"
 
     @property
     def where(self) -> str:
+        """Name the knot that contributes most to the kink bound, its time and its share."""
         return f"{100 * self.share:.0f}% at {self.knot} ({self.knot_ms:g} ms)"
 
 
 def knot_ms(p: Patch, path: str) -> float:
-    """The time of a knot named by its path, such as "noise[2].amp[3]", as the patch writes it."""
+    """Return the time of a knot named by its path, such as "noise[2].amp[3]", as the patch writes it."""
     curve, index = path[: path.rindex("[")], int(path[path.rindex("[") + 1 : -1])
     if curve == "body.amp":
         knots = p.body.amp
@@ -347,10 +387,12 @@ def knot_ms(p: Patch, path: str) -> float:
         knots = p.body.pitch
     else:
         knots = p.noise[int(curve[len("noise[") : curve.index("]")]) - 1].amp
-    return knots[index - 1][0]
+    time: float = knots[index - 1][0]
+    return time
 
 
 def cause_of(p: Patch, s: Synthesis, d: Domain) -> Cause:
+    """Find where a take's predicted aliasing comes from."""
     saturation = d.predicted - s.kink
     knots = kink_knots(s.kinks, s.alpha, s.rate, s.band)
     total = math.fsum(c for _, c in knots)
@@ -373,27 +415,30 @@ class Headroom:
     """
 
     db: float
-    edge_db: float | None = None
+    edge_db: float = math.nan  # nan where the status never changes
 
 
-def _alphas(drives) -> np.ndarray:
-    """α with α / tanh α = 10^(drive/20), for many drives at once: bisection on [G − 1, G]."""
+def _alphas(drives: ArrayLike) -> Floats:
+    """Return α with α / tanh α = 10^(drive/20), for many drives at once: bisection on [G − 1, G]."""
     g = 10.0 ** (np.asarray(drives, dtype=float) / 20.0)
     lo, hi = np.maximum(g - 1.0, 0.0), g.copy()
     for _ in range(80):
         mid = 0.5 * (lo + hi)
         below = mid / np.tanh(np.where(mid > 0, mid, 1.0)) < g
         lo, hi = np.where(below, mid, lo), np.where(below, hi, mid)
-    return np.where(g > 1.0, 0.5 * (lo + hi), 0.0)
+    out: Floats = np.where(g > 1.0, 0.5 * (lo + hi), 0.0)
+    return out
 
 
-def _drives(alphas) -> np.ndarray:
+def _drives(alphas: ArrayLike) -> Floats:
+    """Return the drive in dB of each α: 20·log₁₀(α / tanh α), and 0 for α = 0."""
     a = np.asarray(alphas, dtype=float)
-    return np.where(a > 0, 20.0 * np.log10(a / np.tanh(np.where(a > 0, a, 1.0))), 0.0)
+    out: Floats = np.where(a > 0, 20.0 * np.log10(a / np.tanh(np.where(a > 0, a, 1.0))), 0.0)
+    return out
 
 
-def ratios(s: Synthesis, alphas) -> np.ndarray:
-    """The rule's prediction over its limit at many α: above 1 is outside.
+def ratios(s: Synthesis, alphas: ArrayLike) -> Floats:
+    """Return the rule's prediction over its limit at many α: above 1 is outside.
 
     The knee slew and the kink bound are exact at every α. The output peak is
     bounded from below by the probes, which can only raise the ratio, so the
@@ -403,11 +448,12 @@ def ratios(s: Synthesis, alphas) -> np.ndarray:
     p = s.probes.peak(a) if s.probes is not None else np.zeros(a.size)
     q = s.slew.knees.at(a)
     saturation = np.where(q > 0, SATURATION * np.exp(-(math.pi**2) / np.where(q > 0, q, 1.0)) * p, 0.0)
-    return (saturation + kink_bounds(s.kinks, a, s.rate, s.band)) / np.where(p >= QUIET, LIMIT * p, FLOOR)
+    out: Floats = (saturation + kink_bounds(s.kinks, a, s.rate, s.band)) / np.where(p >= QUIET, LIMIT * p, FLOOR)
+    return out
 
 
 def _edge(s: Synthesis, inside: float, outside: float) -> float:
-    """Refine an inside/outside bracket in α, 16 points at a time; returns the inside end.
+    """Refine an inside/outside bracket in α, 16 points at a time, and return the inside end.
 
     Four rounds narrow a 0.5 dB bracket below 10⁻⁵ dB.
     """
@@ -423,7 +469,7 @@ def _edge(s: Synthesis, inside: float, outside: float) -> float:
 
 
 def drive_headroom(s: Synthesis, drive_db: float, d: Domain) -> Headroom | None:
-    """The drive at which the validated-domain status first changes, searched from the patch's own drive.
+    """Find the drive at which the validated-domain status first changes, searched from the patch's own drive.
 
     The rule is not monotone in drive: a step near the knee counts only while
     α·reach ≤ 1, so just below the α where it stops counting the domain can
@@ -483,9 +529,11 @@ class Take:
 
     @property
     def inside(self) -> bool:
+        """Whether the take is inside the validated domain."""
         return self.domain.inside
 
-    def _judgement(self, drive_db: float) -> str:
+    def judgement(self) -> str:
+        """Say whether the take is inside the validated domain, and by how much."""
         d = self.domain
         if not d.predicted:
             return "inside the validated domain (no predicted aliasing)"
@@ -498,8 +546,8 @@ class Take:
             "check it with `halyard verify`"
         )
 
-    def _detail(self, drive_db: float) -> str | None:
-        """What the prediction comes from, and what drive would change the status."""
+    def detail(self, drive_db: float) -> str | None:
+        """Say what the prediction comes from, and what drive would change the status."""
         c, h, d = self.cause, self.headroom, self.domain
         if c.dominant is None or not d.predicted:
             return None
@@ -519,6 +567,8 @@ class Take:
 
 @dataclass(frozen=True)
 class Report:
+    """What a render says about itself: its tuning, its length, its levels and each take's judgement."""
+
     tune_hz: float
     modes_hz: tuple[float, ...]
     body_sounds: bool
@@ -539,6 +589,7 @@ class Report:
 
     @property
     def peak(self) -> float:
+        """The largest sample of any take."""
         return max(t.peak for t in self.takes)
 
     @property
@@ -548,19 +599,23 @@ class Report:
 
     @property
     def inside(self) -> bool:
+        """Whether every take is inside the validated domain."""
         return all(t.inside for t in self.takes)
 
     @property
     def exported_ms(self) -> float:
+        """The length of the exported file."""
         return 1000 * self.samples / self.sample_rate
 
     @property
     def loudness_spread(self) -> float:
+        """The range of the takes' loudness, in dB."""
         values = [t.loudness for t in self.takes if t.loudness > -math.inf]
         return max(values) - min(values) if values else 0.0
 
     @property
     def peak_spread(self) -> float:
+        """The range of the takes' sample peaks, in dB."""
         values = [db(t.peak) for t in self.takes if t.peak > 0]
         return max(values) - min(values) if values else 0.0
 
@@ -570,6 +625,7 @@ class Report:
         return self.loudness_spread > 1.0
 
     def _over(self) -> str:
+        """Say how far over the format's ceiling the render is, and what to do."""
         peak = self.peak
         if FORMATS[self.format] is None:
             return (
@@ -583,6 +639,7 @@ class Report:
         )
 
     def _levels(self, t: Take) -> tuple[str, str]:
+        """Describe a take's peak and loudness."""
         if t.peak == 0:
             peak = "silent"
         elif self.over and t.peak == self.peak:
@@ -597,6 +654,7 @@ class Report:
         return peak, loudness
 
     def lines(self) -> list[str]:
+        """Describe the render, a labelled line at a time."""
         modes = ", ".join(f"{f:.1f}" for f in self.modes_hz)
         tuning = f"{self.tune_hz:.3f} Hz, {describe_tuning(self.tune_hz)}"
         if self.body_sounds:
@@ -610,14 +668,16 @@ class Report:
             ("tuning", tuning),
             (
                 "length",
-                f"{self.source_ms:.1f} ms source, {self.exported_ms:.1f} ms exported "
-                f"({self.samples} samples at {self.sample_rate} Hz, {pcm}), {seeds}",
+                (
+                    f"{self.source_ms:.1f} ms source, {self.exported_ms:.1f} ms exported "
+                    f"({self.samples} samples at {self.sample_rate} Hz, {pcm}), {seeds}"
+                ),
             ),
         ]
         if len(self.takes) == 1:
             peak, loudness = self._levels(first)
-            rows += [("peak", peak), ("loudness", loudness), ("domain", first._judgement(self.drive_db))]
-            detail = first._detail(self.drive_db)
+            rows += [("peak", peak), ("loudness", loudness), ("domain", first.judgement())]
+            detail = first.detail(self.drive_db)
             if detail:
                 rows.append(("", detail))
         else:
@@ -633,29 +693,33 @@ class Report:
                 gain = f", take gain {t.gain_db:+.2f} dB" if self.level_match else ""
                 level = "silent" if t.peak == 0 else f"{db(t.peak):.2f} dBFS, {t.loudness:.1f} LUFS"
                 rows.append((f"take {t.number}", f"seed {t.seed}: {level}{gain}"))
-                rows.append(("", t._judgement(self.drive_db)))
-                detail = t._detail(self.drive_db)
+                rows.append(("", t.judgement()))
+                detail = t.detail(self.drive_db)
                 if detail:
                     rows.append(("", detail))
         rows.append(("render", f"{1000 * self.render_s:.0f} ms"))
         width = max(9, max(len(label) for label, _ in rows) + 1)
         return [f"{label:<{width}}{text}" for label, text in rows]
 
+    @override
     def __str__(self) -> str:
+        """Describe the render."""
         return "\n".join(self.lines())
 
 
-def take_seeds(p: Patch, takes: int) -> list[int]:
-    """Take j plays seed + j − 1 (plan §6)."""
+def take_seeds(p: Patch, takes: object) -> list[int]:
+    """Return the takes' seeds: take j plays seed + j − 1 (plan §6)."""
     if isinstance(takes, bool) or not isinstance(takes, int) or not 1 <= takes <= MAX_TAKES:
-        raise RenderError(f"--takes: needs 1 to {MAX_TAKES} takes, found {takes!r}")
+        msg = f"--takes: needs 1 to {MAX_TAKES} takes, found {takes!r}"
+        raise RenderError(msg)
     if p.seed + takes - 1 > MAX_SEED:
-        raise RenderError(f"--takes: seeds {p.seed} … {p.seed + takes - 1} pass 2**63 - 1; lower the patch's seed")
+        msg = f"--takes: seeds {p.seed} … {p.seed + takes - 1} pass 2**63 - 1; lower the patch's seed"
+        raise RenderError(msg)
     return [p.seed + j for j in range(takes)]
 
 
-def set_gains(outs: list[np.ndarray], p: Patch, level_match: bool, top: float) -> tuple[float, list[float]]:
-    """One gain for the whole set, and each take's gain from level matching (1 without)."""
+def set_gains(outs: list[Floats], p: Patch, top: float, *, level_match: bool) -> tuple[float, list[float]]:
+    """Return one gain for the whole set, and each take's gain from level matching (1 without)."""
     rate = p.output.sample_rate
     takes = [1.0] * len(outs)
     if level_match:
@@ -663,31 +727,33 @@ def set_gains(outs: list[np.ndarray], p: Patch, level_match: bool, top: float) -
         takes = [10.0 ** ((loud[0] - x) / 20.0) if loud[0] > -math.inf and x > -math.inf else 1.0 for x in loud]
     if p.output.mode == "gain":
         return 10.0 ** (p.output.db / 20.0), takes
-    peak = max(float(np.max(np.abs(o), initial=0.0)) * g for o, g in zip(outs, takes))
+    peak = max(float(np.max(np.abs(o), initial=0.0)) * g for o, g in zip(outs, takes, strict=True))
     target = min(10.0 ** (p.output.db / 20.0), top)
     return (target / peak if peak > 0 else 1.0), takes
 
 
-def output_stage(out: np.ndarray, gain: float, polarity: int) -> np.ndarray:
-    """The gain, then the polarity, then one conversion to float32."""
+def output_stage(out: Floats, gain: float, polarity: int) -> NDArray[np.float32]:
+    """Apply the gain, then the polarity, then one conversion to float32."""
     scaled = out * gain
     if polarity < 0:
         scaled = -scaled
     return scaled.astype(np.float32)
 
 
-def render_takes(p: Patch, takes: int = 1, level_match: bool = False) -> tuple[list[np.ndarray], Report]:
-    """The float32 audio of each take, before any PCM quantization, and the report of the set."""
+def render_takes(p: Patch, takes: int = 1, *, level_match: bool = False) -> tuple[list[NDArray[np.float32]], Report]:
+    """Return the float32 audio of each take, before any PCM quantization, and the report of the set."""
     start = time.perf_counter()
     seeds = take_seeds(p, takes)
     top = ceiling(p.output.format)
     synths = [synthesize(dataclasses.replace(p, seed=s)) if s != p.seed else synthesize(p) for s in seeds]
-    gain, take_gains = set_gains([s.out for s in synths], p, level_match, top)
-    audio, rows = [], []
-    for j, (seed, s, g) in enumerate(zip(seeds, synths, take_gains), 1):
+    gain, take_gains = set_gains([s.out for s in synths], p, top, level_match=level_match)
+    audio: list[NDArray[np.float32]] = []
+    rows: list[Take] = []
+    for j, (seed, s, g) in enumerate(zip(seeds, synths, take_gains, strict=True), 1):
         a = output_stage(s.out, gain * g, p.output.polarity)
         if not np.all(np.isfinite(a)):
-            raise RenderError("the render produced non-finite samples")
+            msg = "the render produced non-finite samples"
+            raise RenderError(msg)
         d = domain(s)
         audio.append(a)
         rows.append(
@@ -701,7 +767,7 @@ def render_takes(p: Patch, takes: int = 1, level_match: bool = False) -> tuple[l
                 d,
                 cause_of(p, s, d),
                 drive_headroom(s, p.drive.db, d),
-            )
+            ),
         )
     v = voice(p)
     report = Report(
@@ -726,8 +792,8 @@ def render_takes(p: Patch, takes: int = 1, level_match: bool = False) -> tuple[l
     return audio, report
 
 
-def render(p: Patch) -> tuple[np.ndarray, Report]:
-    """The float32 audio of the patch's own take, and its report."""
+def render(p: Patch) -> tuple[NDArray[np.float32], Report]:
+    """Return the float32 audio of the patch's own take, and its report."""
     audio, report = render_takes(p, 1)
     return audio[0], report
 
@@ -735,7 +801,7 @@ def render(p: Patch) -> tuple[np.ndarray, Report]:
 # Export.
 
 
-def quantize(audio: np.ndarray, bits: int, seed: int) -> np.ndarray:
+def quantize(audio: NDArray[np.float32], bits: int, seed: int) -> NDArray[np.int32]:
     """Round to `bits`-bit PCM with the seed's TPDF dither of ±1 LSB.
 
     Exact zeros stay zero, so the silent first sample and any digital silence
@@ -746,21 +812,32 @@ def quantize(audio: np.ndarray, bits: int, seed: int) -> np.ndarray:
     x = audio.astype(float) * top
     q = np.round(np.where(x != 0.0, x + noise.dither(seed, x.size), 0.0))
     if q.size and (q.max() > top - 1 or q.min() < -top):
-        raise RenderError(f"the render does not fit {bits}-bit PCM")
+        msg = f"the render does not fit {bits}-bit PCM"
+        raise RenderError(msg)
     return q.astype(np.int32)
 
 
-def provenance(
-    p: Patch, *, seed: int, take: int, takes: int, set_gain_db: float, take_gain_db: float, k: int = K
-) -> dict:
+class Stamp(NamedTuple):
+    """Which take a file holds, of how many, and the gains it was rendered with."""
+
+    seed: int
+    take: int
+    takes: int
+    set_gain_db: float
+    take_gain_db: float
+
+
+def provenance(p: Patch, stamp: Stamp, *, k: int = K) -> dict[str, Any]:
+    """Return what a file records of how it was made: renderer, take, gains, filter and libraries."""
     rate, factor = rates(p.output.sample_rate, k)
-    meta = {
+    seed = stamp.seed
+    meta: dict[str, Any] = {
         "renderer": f"halyard {__version__}",
         "seed": seed,
-        "take": take,
-        "takes": takes,
-        "set_gain_db": set_gain_db,
-        "take_gain_db": take_gain_db,
+        "take": stamp.take,
+        "takes": stamp.takes,
+        "set_gain_db": stamp.set_gain_db,
+        "take_gain_db": stamp.take_gain_db,
         "decimator": {
             "sha256": decimator(FAMILY[p.output.sample_rate], k).sha256,
             "internal_rate": rate,
@@ -782,16 +859,12 @@ def provenance(
 
 
 def write_take(
-    path,
-    audio: np.ndarray,
+    path: str | os.PathLike[str],
+    audio: NDArray[np.float32],
     p: Patch,
+    stamp: Stamp,
     *,
-    seed: int,
-    take: int,
-    takes: int,
-    set_gain_db: float,
-    take_gain_db: float,
-    extra: dict | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     """Write one take's WAV in the patch's format, with its root note, its own patch text and provenance.
 
@@ -799,25 +872,16 @@ def write_take(
     extract` recovers exactly the patch that renders this file.
     """
     bits = FORMATS[p.output.format]
-    samples = audio if bits is None else quantize(audio, bits, seed)
+    samples = audio if bits is None else quantize(audio, bits, stamp.seed)
     root = wav.root_note(p.body.tune_hz) if voice(p).body_sounds else None
     meta = {
-        "patch": dumps(dataclasses.replace(p, seed=seed)),
-        **provenance(p, seed=seed, take=take, takes=takes, set_gain_db=set_gain_db, take_gain_db=take_gain_db),
+        "patch": dumps(dataclasses.replace(p, seed=stamp.seed)),
+        **provenance(p, stamp),
         **(extra or {}),
     }
-    wav.write(path, samples, p.output.sample_rate, bits=bits, root=root, meta=meta)
+    wav.write(path, samples, wav.Format(p.output.sample_rate, bits), root=root, meta=meta)
 
 
-def export(path, audio: np.ndarray, p: Patch, report: Report, take: Take) -> None:
+def export(path: str | os.PathLike[str], audio: NDArray[np.float32], p: Patch, report: Report, take: Take) -> None:
     """Write one take of a render."""
-    write_take(
-        path,
-        audio,
-        p,
-        seed=take.seed,
-        take=take.number,
-        takes=len(report.takes),
-        set_gain_db=report.set_gain_db,
-        take_gain_db=take.gain_db,
-    )
+    write_take(path, audio, p, Stamp(take.seed, take.number, len(report.takes), report.set_gain_db, take.gain_db))

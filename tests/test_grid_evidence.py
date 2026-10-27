@@ -9,16 +9,14 @@ rule needs new evidence.
 """
 
 import math
-import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "tools"))
-grid = pytest.importorskip("grid")
 
-from halyard_synth.render import K, QUIET, SATURATION  # noqa: E402
+from halyard_synth.render import QUIET, SATURATION, K
+from tools import grid, headroom
 
 
 @pytest.fixture(scope="module")
@@ -80,7 +78,6 @@ def test_references_converge(rows):
 
 @pytest.fixture(scope="module")
 def headroom_rows():
-    headroom = pytest.importorskip("headroom")
     path = ROOT / "docs" / "grid" / "headroom.csv"
     if not path.exists():
         pytest.skip("no headroom evidence recorded")
@@ -96,7 +93,6 @@ def test_the_reported_drive_headroom_is_never_optimistic(headroom_rows):
     assert max(r["error"] for r in edges) <= 1e-4  # the brute force's bisection resolution
     # Where full renders never change status within 0–48 dB, the report says so too, or is cautious: it may
     # place an edge where the status in fact stays inside, but never claims a way back in that is not there.
-    headroom = pytest.importorskip("headroom")
     _, cautious, wrong = headroom.split_infinite([r for r in rows if not math.isfinite(r["reference"])])
     assert not wrong and len(cautious) <= 3
 

@@ -7,7 +7,6 @@ Across machines and library versions the output agrees within floating-point
 rounding, so the comparison uses a tolerance rather than a hash (plan §6).
 """
 
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -17,10 +16,9 @@ from halyard_synth import wav
 from halyard_synth.cli import REFERENCES, reference_text
 from halyard_synth.patch import loads
 from halyard_synth.render import render_takes
+from tools.golden import TAKES
 
 GOLDEN = Path(__file__).parent / "golden"
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
-from golden import TAKES  # noqa: E402
 
 
 @pytest.mark.parametrize("name", REFERENCES)

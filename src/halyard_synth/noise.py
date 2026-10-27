@@ -37,9 +37,18 @@ import math
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 
 import numpy as np
 import scipy.fft
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from numpy.typing import ArrayLike, NDArray
+
+    type Floats = NDArray[np.float64]
+    type Words = NDArray[np.uint64]
 
 COMPONENTS = 20000
 KEY = b"snare/noise/v1"
@@ -47,12 +56,14 @@ DITHER_KEY = b"snare/dither/v1"
 
 
 def _check_seed(seed: int) -> None:
+    """Refuse a seed outside 0 … 2**63 − 1."""
     if not 0 <= seed < 2**63:
-        raise ValueError("seed must be an integer from 0 to 2**63 - 1")
+        msg = "seed must be an integer from 0 to 2**63 - 1"
+        raise ValueError(msg)
 
 
-def uniforms(seed: int) -> tuple[np.ndarray, np.ndarray]:
-    """The two 53-bit integers per component, from SHAKE-256 of the key and seed."""
+def uniforms(seed: int) -> tuple[Words, Words]:
+    """Return the two 53-bit integers per component, from SHAKE-256 of the key and seed."""
     _check_seed(seed)
     stream = hashlib.shake_256(KEY + seed.to_bytes(8, "little")).digest(16 * COMPONENTS)
     words = np.frombuffer(stream, dtype="<u8").reshape(COMPONENTS, 2) >> np.uint64(11)
@@ -60,8 +71,8 @@ def uniforms(seed: int) -> tuple[np.ndarray, np.ndarray]:
 
 
 @functools.lru_cache(maxsize=16)
-def coefficients(seed: int) -> tuple[np.ndarray, np.ndarray]:
-    """Amplitudes ρ_k and phases θ_k for f_k = 1 … 20000 Hz (read-only)."""
+def coefficients(seed: int) -> tuple[Floats, Floats]:
+    """Return the amplitudes ρ_k and phases θ_k for f_k = 1 … 20000 Hz (read-only)."""
     a, b = uniforms(seed)
     u = (a + np.uint64(1)).astype(float) * 2.0**-53  # (0, 1]
     v = b.astype(float) * 2.0**-53  # [0, 1)
@@ -70,15 +81,15 @@ def coefficients(seed: int) -> tuple[np.ndarray, np.ndarray]:
     return rho, theta
 
 
-def band_power(lo: float, hi: float) -> np.ndarray:
-    """|H(f_k)|² for the band with half-power points lo and hi."""
+def band_power(lo: float, hi: float) -> Floats:
+    """Return |H(f_k)|² for the band with half-power points lo and hi."""
     f = np.arange(1, COMPONENTS + 1, dtype=float)
     return 1.0 / ((1.0 + (lo / f) ** 4) * (1.0 + (f / hi) ** 4))
 
 
 @functools.lru_cache(maxsize=32)
-def amplitudes(seed: int, lo: float, hi: float) -> tuple[np.ndarray, np.ndarray]:
-    """Calibrated component amplitudes γ|H(f_k)|ρ_k and phases θ_k (read-only)."""
+def amplitudes(seed: int, lo: float, hi: float) -> tuple[Floats, Floats]:
+    """Return the calibrated component amplitudes γ|H(f_k)|ρ_k and phases θ_k (read-only)."""
     rho, theta = coefficients(seed)
     power = band_power(lo, hi)
     gamma = math.sqrt(0.5 / math.fsum(power))
@@ -87,42 +98,46 @@ def amplitudes(seed: int, lo: float, hi: float) -> tuple[np.ndarray, np.ndarray]
     return amp, theta
 
 
-def at(seed: int, lo: float, hi: float, t, derivative: bool = False) -> np.ndarray:
-    """n(t), or n′(t), at arbitrary times by summing the components (for a few points, and for tests)."""
+def at(seed: int, lo: float, hi: float, t: ArrayLike, *, derivative: bool = False) -> Floats:
+    """Return n(t), or n′(t), at arbitrary times by summing the components (for a few points, and for tests)."""
     amp, theta = amplitudes(seed, lo, hi)
     k = np.arange(1, COMPONENTS + 1, dtype=float)
     phase = 2 * np.pi * np.mod(np.outer(np.atleast_1d(t), k), 1.0) + theta
-    if derivative:
-        return -(np.sin(phase) @ (2 * np.pi * k * amp))
-    return np.cos(phase) @ amp
+    out: Floats = -(np.sin(phase) @ (2 * np.pi * k * amp)) if derivative else np.cos(phase) @ amp
+    return out
 
 
-def _components(seed: int, lo: float, hi: float, rate: int) -> np.ndarray:
-    """The nonzero bins of the table's spectrum, 1 … 20000 Hz."""
+def _components(seed: int, lo: float, hi: float, rate: int) -> NDArray[np.complex128]:
+    """Return the nonzero bins of the table's spectrum, 1 … 20000 Hz."""
     amp, theta = amplitudes(seed, lo, hi)
-    return (rate / 2) * amp * np.exp(1j * theta)
+    phasor: NDArray[np.complex128] = np.exp(1j * theta)
+    out: NDArray[np.complex128] = (rate / 2) * amp * phasor
+    return out
 
 
 def _check_rate(rate: int) -> None:
+    """Refuse a table rate that is odd or not above 40 kHz."""
     if rate % 2 or rate <= 2 * COMPONENTS:
-        raise ValueError("a noise table needs an even rate above 40 kHz")
+        msg = "a noise table needs an even rate above 40 kHz"
+        raise ValueError(msg)
 
 
-def table(seed: int, lo: float, hi: float, rate: int) -> np.ndarray:
-    """n(j / rate) for j = 0 … rate − 1, uncached (the reference renderer's large tables)."""
+def table(seed: int, lo: float, hi: float, rate: int) -> Floats:
+    """Return n(j / rate) for j = 0 … rate − 1, uncached (the reference renderer's large tables)."""
     _check_rate(rate)
     spectrum = np.zeros(rate // 2 + 1, dtype=complex)
     spectrum[1 : COMPONENTS + 1] = _components(seed, lo, hi, rate)
-    return scipy.fft.irfft(spectrum, n=rate)
+    out: Floats = scipy.fft.irfft(spectrum, n=rate)
+    return out
 
 
-_CACHE: dict[tuple, np.ndarray] = {}  # insertion order is recency: the most recently used last
+_CACHE: dict[tuple[int, float, float, int], Floats] = {}  # insertion order is recency: the most recently used last
 _LOCK = threading.Lock()
 CACHE_TABLES = 8  # about 100 MB at the shipping rates
 
 
-def tables(seed: int, bands, rate: int) -> list[np.ndarray]:
-    """One read-only table per band, computed in parallel and cached (plan §3)."""
+def tables(seed: int, bands: Iterable[tuple[float, float]], rate: int) -> list[Floats]:
+    """Return one read-only table per band, computed in parallel and cached (plan §3)."""
     _check_rate(rate)
     keys = [(seed, float(lo), float(hi), rate) for lo, hi in bands]
     with _LOCK:
@@ -131,7 +146,7 @@ def tables(seed: int, bands, rate: int) -> list[np.ndarray]:
             # One transform per table, in threads (the FFT releases the GIL): faster than a
             # batched transform, and a table never depends on which others it was computed with.
             with ThreadPoolExecutor(max_workers=min(len(missing), os.cpu_count() or 1)) as pool:
-                for k, row in zip(missing, pool.map(lambda k: table(*k), missing)):
+                for k, row in zip(missing, pool.map(lambda k: table(*k), missing), strict=True):
                     row.flags.writeable = False
                     _CACHE[k] = row
         for k in keys:
@@ -141,18 +156,19 @@ def tables(seed: int, bands, rate: int) -> list[np.ndarray]:
         return [_CACHE[k] for k in keys]
 
 
-def interpolate(table_: np.ndarray, rate: int, t) -> tuple[np.ndarray, np.ndarray]:
-    """n(t) and n′(t) at arbitrary times, by the cubic through the four nearest table samples.
+def interpolate(table_: Floats, rate: int, t: ArrayLike) -> tuple[Floats, Floats]:
+    """Return n(t) and n′(t) at arbitrary times, by the cubic through the four nearest table samples.
 
     The table is periodic with period 1 s. At the internal rates of 32× the
     error is at most about 2·10⁻⁶ of the noise's RMS value and 1.5·10⁻⁴ of its
     RMS slope, for the widest band (measured); the kink bound's 1% inflation
     covers it with room to spare.
     """
-    t = np.atleast_1d(np.asarray(t, dtype=float))
-    pos = np.mod(t, 1.0) * rate
-    i = np.floor(pos).astype(np.int64)
-    u = pos - i
+    times = np.atleast_1d(np.asarray(t, dtype=float))
+    pos = np.mod(times, 1.0) * rate
+    whole = np.floor(pos)
+    i = whole.astype(np.int64)
+    u = pos - whole
     y = [table_[(i + k) % rate] for k in (-1, 0, 1, 2)]
     # Lagrange weights on nodes −1, 0, 1, 2, and their derivatives with respect to u.
     w = (
@@ -162,13 +178,13 @@ def interpolate(table_: np.ndarray, rate: int, t) -> tuple[np.ndarray, np.ndarra
         (u + 1) * u * (u - 1) / 6,
     )
     dw = (-(3 * u * u - 6 * u + 2) / 6, (3 * u * u - 4 * u - 1) / 2, -(3 * u * u - 2 * u - 2) / 2, (3 * u * u - 1) / 6)
-    value = sum(wk * yk for wk, yk in zip(w, y))
-    slope = sum(dk * yk for dk, yk in zip(dw, y)) * rate
+    value: Floats = sum((wk * yk for wk, yk in zip(w, y, strict=True)), np.zeros_like(u))
+    slope: Floats = sum((dk * yk for dk, yk in zip(dw, y, strict=True)), np.zeros_like(u)) * rate
     return value, slope
 
 
-def dither(seed: int, count: int) -> np.ndarray:
-    """Triangular (TPDF) dither in LSB for `count` samples, from SHAKE-256 of its own key and the seed.
+def dither(seed: int, count: int) -> Floats:
+    """Return triangular (TPDF) dither in LSB for `count` samples, from SHAKE-256 of its own key and the seed.
 
     Each value is the difference of two 32-bit uniforms on [0, 1), so it lies in
     (−1, 1) with a triangular density: the dither that makes the first two

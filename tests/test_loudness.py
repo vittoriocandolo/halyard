@@ -5,12 +5,13 @@ import math
 
 import numpy as np
 import pytest
-from conftest import EXAMPLE, make
 from scipy.signal import sosfreqz
 
 from halyard_synth import render as R
 from halyard_synth.loudness import k_weighting, momentary_max
 from halyard_synth.patch import loads
+
+from .conftest import EXAMPLE, make
 
 # ITU-R BS.1770-4, table 1 and table 2: the K-weighting biquads at 48 kHz.
 SHELF_48K = [1.53512485958697, -2.69169618940638, 1.19839281085285, 1.0, -1.69065929318241, 0.73248077421585]

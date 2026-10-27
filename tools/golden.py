@@ -6,7 +6,7 @@
 Golden files begin once the rendering policy is frozen (milestone 2). Only
 regenerate them for a deliberate change to the sound, and say so in the commit.
 
-    python tools/golden.py
+    uv run python -m tools.golden
 """
 
 from __future__ import annotations

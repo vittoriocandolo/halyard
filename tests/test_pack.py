@@ -53,7 +53,7 @@ def ladder(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def built(ladder):
-    return K.build([(p.stem, loads(p.read_text())) for p in ladder], takes=3)
+    return K.build([(p.stem, loads(p.read_text())) for p in ladder], K.Options(3))
 
 
 def test_velocity_ranges_follow_the_square_law():
@@ -120,7 +120,7 @@ def test_the_level_follows_the_square_law_across_layer_boundaries(built, tmp_pat
 def test_the_pack_shares_one_gain(ladder):
     peak = dataclasses.replace(loads(ladder[0].read_text()).output, mode="peak", db=-1.0)
     patches = [(p.stem, dataclasses.replace(loads(p.read_text()), output=peak)) for p in ladder]
-    pk = K.build(patches, takes=2)
+    pk = K.build(patches, K.Options(2))
     peaks = [float(np.max(np.abs(a))) for row in pk.audio for a in row]
     assert 20 * math.log10(max(peaks)) == pytest.approx(-1.0, abs=1e-6)
     assert peaks.index(max(peaks)) < 2  # the loudest layer holds the loudest file
@@ -129,7 +129,7 @@ def test_the_pack_shares_one_gain(ladder):
 
 def test_level_matching_within_each_layer(ladder):
     patches = [(p.stem, loads(p.read_text())) for p in ladder[:2]]
-    pk = K.build(patches, takes=4, level_match=True)
+    pk = K.build(patches, K.Options(4, level_match=True))
     for layer, files in zip(pk.layers, pk.audio):
         rate = layer.patch.output.sample_rate
         first = momentary_max(files[0], rate)
@@ -151,16 +151,16 @@ def test_files_carry_their_take_and_layer(built, tmp_path):
 def test_a_pack_re_renders_bit_identically(ladder, tmp_path):
     patches = [(p.stem, loads(p.read_text())) for p in ladder[:2]]
     for d in ("a", "b"):
-        K.write(K.build(patches, takes=2), tmp_path / d)
+        K.write(K.build(patches, K.Options(2)), tmp_path / d)
     for f in sorted((tmp_path / "a").iterdir()):
         assert f.read_bytes() == (tmp_path / "b" / f.name).read_bytes()
 
 
 def test_a_clap_takes_the_clap_key():
     clap = loads(cli.reference_text("clap"))
-    pk = K.build([("clap", clap), ("clap-12", softer(clap, 12))], takes=1)
+    pk = K.build([("clap", clap), ("clap-12", softer(clap, 12))], K.Options(1))
     assert pk.key == 39 and "key=39" in pk.sfz()
-    assert K.build([("clap", clap)], takes=1, key=40).key == 40
+    assert K.build([("clap", clap)], K.Options(1, 40)).key == 40
 
 
 def test_packs_refuse_what_they_cannot_map(ladder):

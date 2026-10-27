@@ -6,11 +6,12 @@ import dataclasses
 import numpy as np
 import pytest
 import soundfile
-from conftest import EXAMPLE
 
 from halyard_synth import cli, wav
 from halyard_synth.patch import dumps, loads
 from halyard_synth.render import render, render_takes
+
+from .conftest import EXAMPLE
 
 
 def run(capsys, *args):

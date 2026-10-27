@@ -9,13 +9,14 @@ seed computes its noise tables, as every take does; a repeated render finds
 them cached, as audition's re-renders do. Both are reported, and the budget
 applies to the first.
 
-    python tools/bench.py
+    uv run python -m tools.bench
 """
 
 from __future__ import annotations
 
 import json
 import platform
+from pathlib import Path
 import subprocess
 import sys
 
@@ -47,13 +48,13 @@ PACK = r"""
 import json, resource, time
 from halyard_synth import cli
 from halyard_synth.patch import loads, softer
-from halyard_synth.pack import build
+from halyard_synth.pack import Options, build
 from halyard_synth.render import decimator
 p = loads(cli.reference_text("crack"))
 decimator(48000)
 base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 t0 = time.perf_counter()
-pk = build([(f"v{db}", softer(p, db)) for db in (0, 8, 16, 24)], takes=8)
+pk = build([(f"v{db}", softer(p, db)) for db in (0, 8, 16, 24)], Options(8))
 seconds = time.perf_counter() - t0
 peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 print(json.dumps({"seconds": seconds, "mib": (peak - base) / 1024, "files": sum(len(r) for r in pk.audio)}))
@@ -64,7 +65,7 @@ HIT_S, LONG_S, PACK_S, MEMORY_MIB = 0.3, 1.5, 15.0, 300
 
 def cpu() -> str:
     try:
-        for line in open("/proc/cpuinfo"):
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
             if line.startswith("model name"):
                 return line.split(":", 1)[1].strip()
     except OSError:
