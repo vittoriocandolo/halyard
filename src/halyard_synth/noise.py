@@ -141,19 +141,25 @@ def tables(seed: int, bands: Iterable[tuple[float, float]], rate: int) -> list[F
     _check_rate(rate)
     keys = [(seed, float(lo), float(hi), rate) for lo, hi in bands]
     with _LOCK:
-        missing = sorted({k for k in keys if k not in _CACHE})
-        if missing:
-            # One transform per table, in threads (the FFT releases the GIL): faster than a
-            # batched transform, and a table never depends on which others it was computed with.
-            with ThreadPoolExecutor(max_workers=min(len(missing), os.cpu_count() or 1)) as pool:
-                for k, row in zip(missing, pool.map(lambda k: table(*k), missing), strict=True):
-                    row.flags.writeable = False
-                    _CACHE[k] = row
+        found = {k: _CACHE[k] for k in keys if k in _CACHE}
+    missing = sorted(set(keys) - found.keys())
+    if missing:
+        # Computed without the lock, so a render whose tables are cached never waits on another's. One
+        # transform per table, in threads (the FFT releases the GIL): faster than a batched transform, and
+        # a table never depends on which others it was computed with.
+        with ThreadPoolExecutor(max_workers=min(len(missing), os.cpu_count() or 1)) as pool:
+            for k, row in zip(missing, pool.map(lambda k: table(*k), missing), strict=True):
+                row.flags.writeable = False
+                found[k] = row
+    with _LOCK:
         for k in keys:
-            _CACHE[k] = _CACHE.pop(k)
+            # A table another render cached meanwhile is kept, so one table is always one array; one
+            # evicted meanwhile comes back.
+            found[k] = _CACHE.pop(k, found[k])
+            _CACHE[k] = found[k]
         while len(_CACHE) > max(CACHE_TABLES, len(set(keys))):
             del _CACHE[next(iter(_CACHE))]
-        return [_CACHE[k] for k in keys]
+    return [found[k] for k in keys]
 
 
 def cached() -> list[tuple[int, float, float, int]]:

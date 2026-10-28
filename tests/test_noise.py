@@ -6,6 +6,7 @@
 import hashlib
 import math
 import threading
+import time
 from collections.abc import Iterator
 
 import numpy as np
@@ -34,6 +35,7 @@ SKIRT_OVERLAP = 0.025  # bands four octaves apart share about 2% of their power
 VALUE = 2e-6  # the interpolated noise is this close to the summed, relative to its RMS
 SLOPE = 1.5e-4  # and its slope, relative to the RMS slope
 THREADS = 6
+PROMPT_S = 0.05  # a cached table comes back within this, however long another render takes
 
 
 def direct(seed: int, lo: float, hi: float, j: NDArray[np.int64], rate: int) -> Floats:
@@ -407,3 +409,57 @@ def test_cache_is_safe_across_threads() -> None:
         t.join()
     assert len(results) == THREADS
     assert all(r[0] is results[0][0] and r[1] is results[0][1] for r in results)
+
+
+@pytest.mark.usefixtures("fresh_cache")
+def test_a_render_never_waits_on_the_tables_of_another(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Return cached tables at once while another render is still computing its own."""
+    cached = noise.tables(1, [WIRES], RATE)[0]
+    computing, release = threading.Event(), threading.Event()
+    compute = noise.table
+
+    def slow(seed: int, lo: float, hi: float, rate: int) -> Floats:
+        computing.set()
+        assert release.wait(PROMPT_S * 100)
+        return compute(seed, lo, hi, rate)
+
+    monkeypatch.setattr(noise, "table", slow)
+    other = threading.Thread(target=noise.tables, args=(2, [WIDEST], RATE))
+    other.start()
+    assert computing.wait(PROMPT_S * 100)
+    start = time.perf_counter()
+    assert noise.tables(1, [WIRES], RATE)[0] is cached
+    assert time.perf_counter() - start < PROMPT_S
+    release.set()
+    other.join()
+    assert (2, *WIDEST, RATE) in noise.cached()
+
+
+@pytest.mark.usefixtures("fresh_cache")
+def test_two_renders_computing_one_table_share_one_array(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the first copy of a table two renders computed at once, so both renders hold the same array."""
+    computing, release = threading.Event(), threading.Event()
+    compute = noise.table
+
+    calls: list[int] = []
+
+    def first_waits(seed: int, lo: float, hi: float, rate: int) -> Floats:
+        calls.append(seed)
+        if len(calls) == 1:  # the first render's computation, in its pool's thread
+            computing.set()
+            assert release.wait(PROMPT_S * 100)
+        return compute(seed, lo, hi, rate)
+
+    monkeypatch.setattr(noise, "table", first_waits)
+    late: list[Floats] = []
+
+    def first() -> None:
+        late.append(noise.tables(3, [WIRES], RATE)[0])
+
+    thread = threading.Thread(target=first)
+    thread.start()
+    assert computing.wait(PROMPT_S * 100)
+    early = noise.tables(3, [WIRES], RATE)[0]  # computed and cached while the first render still computes
+    release.set()
+    thread.join()
+    assert late[0] is early
