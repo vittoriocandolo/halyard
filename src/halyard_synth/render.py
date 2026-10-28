@@ -23,7 +23,6 @@ import functools
 import hashlib
 import json
 import math
-import os
 import platform
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -35,7 +34,7 @@ import numpy as np
 import scipy
 from scipy.signal import upfirdn
 
-from . import __version__, noise, wav
+from . import __version__, cores, noise, wav
 from .loudness import momentary_max, true_peak
 from .patch import MAX_SEED, Patch, describe_tuning, dumps
 from .voice import (
@@ -55,6 +54,8 @@ from .voice import (
 )
 
 if TYPE_CHECKING:
+    import os
+
     from numpy.typing import ArrayLike, NDArray
 
     from .voice import Tables
@@ -146,7 +147,7 @@ def decimate(taps: Floats, y: Floats, factor: int, workers: int | None = None) -
     """
     length = taps.size
     n_out = (y.size + length - 2) // factor + 1
-    workers = min(workers or os.cpu_count() or 1, max(1, n_out // 4096))
+    workers = min(workers or cores.available(), max(1, n_out // 4096))
     if workers == 1:
         whole: Floats = upfirdn(taps, y, down=factor)
         return whole

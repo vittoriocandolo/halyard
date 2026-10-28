@@ -34,13 +34,14 @@ from __future__ import annotations
 import functools
 import hashlib
 import math
-import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import numpy as np
 import scipy.fft
+
+from . import cores
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -147,7 +148,7 @@ def tables(seed: int, bands: Iterable[tuple[float, float]], rate: int) -> list[F
         # Computed without the lock, so a render whose tables are cached never waits on another's. One
         # transform per table, in threads (the FFT releases the GIL): faster than a batched transform, and
         # a table never depends on which others it was computed with.
-        with ThreadPoolExecutor(max_workers=min(len(missing), os.cpu_count() or 1)) as pool:
+        with ThreadPoolExecutor(max_workers=min(len(missing), cores.available())) as pool:
             for k, row in zip(missing, pool.map(lambda k: table(*k), missing), strict=True):
                 row.flags.writeable = False
                 found[k] = row

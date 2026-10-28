@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, TextIO
 
 import numpy as np
 
-from . import __version__
+from . import __version__, cores
 from .loudness import momentary_max
 from .patch import Patch, PatchError, load
 from .render import Domain, RenderError, Stamp, ceiling, db, domain, output_stage, synthesize, take_seeds, write_take
@@ -236,7 +236,8 @@ def _render(
         # Workers start from a fork server, or fresh where there is none (Windows), never by forking the caller: a
         # thread of the caller holding a lock, such as the table cache's, would leave a worker deadlocked on it.
         method = "forkserver" if "forkserver" in multiprocessing.get_all_start_methods() else "spawn"
-        with ProcessPoolExecutor(n, mp_context=multiprocessing.get_context(method)) as pool:
+        context = multiprocessing.get_context(method)
+        with ProcessPoolExecutor(n, mp_context=context, initializer=cores.share, initargs=(n,)) as pool:
             done = list(pool.map(_synthesize, jobs))
     else:
         done = [_synthesize(p) for p in jobs]
