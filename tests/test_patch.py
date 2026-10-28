@@ -134,6 +134,21 @@ def random_patch(rng: np.random.Generator) -> patch.Patch:
                 shape(int(rng.integers(3, 33)), float(rng.uniform(0, 5)), 1990),
             ),
         )
+    brushes = []
+    for _ in range(int(rng.integers(0, patch.MAX_BRUSHES + 1))):
+        lo = float(rng.uniform(40, 9000))
+        low = float(rng.uniform(0.5, 1))
+        sweep_r = rng.uniform(low, min(2.0, 2 * low, 19999 / (lo + 1)), int(rng.integers(2, 33)))
+        sweep_r[int(rng.integers(sweep_r.size))] = low
+        brushes.append(
+            patch.Brush(
+                float(rng.choice([-math.inf, rng.uniform(-90, 24)])),
+                (lo, float(rng.uniform(lo + 1, 20000 / sweep_r.max()))),
+                float(rng.uniform(0, 1)),
+                tuple(zip(times(sweep_r.size, 0.0, 990), sweep_r.tolist(), strict=True)),
+                shape(int(rng.integers(3, 33)), float(rng.uniform(0, 5)), 990),
+            ),
+        )
     mode = str(rng.choice(patch.MODES))
     return patch.Patch(
         seed=int(rng.integers(0, 2**63 - 1)),
@@ -147,6 +162,7 @@ def random_patch(rng: np.random.Generator) -> patch.Patch:
         ),
         noise=tuple(layers),
         rim=tuple(rims),
+        brush=tuple(brushes),
         drive=patch.Drive(float(rng.uniform(0, 48))),
         output=patch.Output(
             int(rng.choice(patch.SAMPLE_RATES)),
@@ -977,3 +993,104 @@ def test_rims_count_in_the_length_and_take_their_edits(example_dict: dict[str, A
     assert q.rim[0].amp[1] == (0.198, 1.0)  # the rise lengthens by v^(−1/5), as the others'
     assert (q.rim[0].modes, q.rim[0].damping) == (p.rim[0].modes, p.rim[0].damping)
     assert patch.softer(p, 12, contact=0).rim[0].amp == p.rim[0].amp
+
+
+# Brushes.
+
+
+type Sweep = tuple[tuple[float, float], ...]
+
+
+def brush(sweep: Sweep = ((0, 1.0), (60, 1.5), (180, 0.9)), **fields: object) -> dict[str, Any]:
+    """Write one [[brush]] table as TOML parses it."""
+    return {
+        "level_db": -3.0,
+        "band_hz": [900.0, 7000.0],
+        "rattle": 0.2,
+        "sweep": [{"ms": m, "ratio": r} for m, r in sweep],
+        "amp": amp((0, 0), (25, 1), (120, 0.5), (240, 0)),
+        **fields,
+    }
+
+
+BRUSH_MS = 240.0  # where the brush ends
+
+
+def test_a_brush_is_optional_and_alone(example_dict: dict[str, Any]) -> None:
+    """Read no [[brush]] as none and one as written, and refuse two or anything but tables."""
+    assert from_dict(example_dict).brush == ()
+    b = from_dict(dict(example_dict, brush=[brush()])).brush[0]
+    assert b == patch.Brush(
+        -3.0,
+        (900.0, 7000.0),
+        0.2,
+        ((0.0, 1.0), (60.0, 1.5), (180.0, 0.9)),
+        ((0.0, 0.0), (25.0, 1.0), (120.0, 0.5), (240.0, 0.0)),
+    )
+    assert "brush: at most 1 brush, found 2" in problems(from_dict, dict(example_dict, brush=[brush()] * 2))
+    found = problems(from_dict, dict(example_dict, brush=brush()))
+    assert "brush: expected an array of tables ([[brush]]), found a table" in found
+    no_sweep = {k: v for k, v in brush().items() if k != "sweep"}
+    assert "brush[1].sweep: missing" in problems(from_dict, dict(example_dict, brush=[no_sweep]))
+    assert "brush[1].rattle: missing" in problems(
+        from_dict,
+        dict(example_dict, brush=[{k: v for k, v in brush().items() if k != "rattle"}]),
+    )
+    assert "brush[1].sweep[1]: expected a { ms, ratio } table, found int" in problems(
+        from_dict,
+        dict(example_dict, brush=[dict(brush(), sweep=[1])]),
+    )
+    p = from_dict(dict(example_dict, brush=[brush()]))
+    assert "brush: expected brushes" in problems(dataclasses.replace, p, brush=[p.brush[0]])
+    narrow = cast("Any", (900.0,))  # deliberately wrong: a band of one edge
+    found = problems(dataclasses.replace, p, brush=(dataclasses.replace(p.brush[0], band_hz=narrow),))
+    assert found == ["brush[1].band_hz: expected [low, high] in Hz"]  # and the sweep's check of the band waits for it
+
+
+def test_a_brush_sweeps_within_an_octave_and_the_audio_band(example_dict: dict[str, Any]) -> None:
+    """Require sweep ratios within 0.5 … 2, an octave of travel at most, and the band within 20 Hz … 20 kHz."""
+
+    def found(sweep: Sweep = ((0, 1.0), (60, 1.5)), **fields: object) -> list[str]:
+        return problems(from_dict, dict(example_dict, brush=[brush(sweep, **fields)]))
+
+    from_dict(dict(example_dict, brush=[brush(((0, 0.5), (100, 1.0)), band_hz=[40.0, 20000.0])]))
+    from_dict(dict(example_dict, brush=[brush(((0, 1.0), (100, 2.0)), band_hz=[20.0, 10000.0])]))
+    assert "brush[1].sweep[2].ratio: 2.1 is outside 0.5 … 2" in found(sweep=((0, 1), (50, 2.1)))
+    assert "brush[1].sweep[1].ratio: 0.4 is outside 0.5 … 2" in found(sweep=((0, 0.4), (50, 1)))
+    assert "brush[1].sweep: travels 3 times, more than an octave" in found(sweep=((0, 0.6), (50, 1.8)))
+    low = found(sweep=((0, 0.5), (50, 1)), band_hz=[30.0, 1000.0])
+    assert "brush[1].sweep: takes the low edge to 15 Hz, below 20 Hz" in low
+    high = found(sweep=((0, 1), (50, 1.5)), band_hz=[900.0, 14000.0])
+    assert "brush[1].sweep: takes the high edge to 21000 Hz, above 20 kHz" in high
+    assert any(m.startswith("brush[1].sweep[2].ms") for m in found(sweep=((0, 1), (1001, 1))))
+    assert "brush[1].sweep: needs 2 to 32 knots, found 1" in found(sweep=((0, 1),))
+    assert any(m.startswith("brush[1].band_hz") for m in found(band_hz=[7000.0, 900.0]))
+    assert any(m.startswith("brush[1].amp") for m in found(amp=amp((0, 0), (5, 0.5), (9, 0))))
+
+
+def test_a_brush_is_written_after_the_rims(example_dict: dict[str, Any]) -> None:
+    """Write a brush as a [[brush]] block after the rims, and none when there is none."""
+    assert "[[brush]]" not in dumps(loads(EXAMPLE))
+    p = from_dict(dict(example_dict, rim=[RIM], brush=[brush(level_db=-math.inf)]))
+    text = dumps(p)
+    assert text.index("[[rim]]") < text.index("[[brush]]") < text.index("[drive]")
+    assert loads(text) == p
+    assert patch.to_dict(p)["brush"][0]["sweep"][1] == {"ms": 60.0, "ratio": 1.5}
+
+
+def test_a_brush_counts_in_the_length_and_takes_its_edits(example_dict: dict[str, Any]) -> None:
+    """Count an audible brush in the length, stretch its sweep and shape by path, and strike it softer."""
+    late = brush(amp=amp((0, 0), (25, 1), (120, 0.5), (400, 0)))
+    p = from_dict(dict(example_dict, brush=[late]))
+    assert p.length_ms == LATE_RIM_MS
+    assert from_dict(dict(example_dict, brush=[dict(late, level_db=-math.inf)])).length_ms == WIRES_MS
+    assert patch.curve_names(p)[-2:] == ("brush[1].sweep", "brush[1].amp")
+    # A sweep stretches from 0 ms, like the pitch; `all` names the amplitude shapes only.
+    assert patch.stretch(p, "brush[1].sweep", 0.5).brush[0].sweep == ((0.0, 1.0), (30.0, 1.5), (90.0, 0.9))
+    assert patch.stretch(p, "all", 0.5).brush[0].sweep == p.brush[0].sweep
+    assert patch.stretch(p, "all", 0.5).brush[0].amp[-1] == (212.5, 0.0)
+    q = patch.softer(p, 12)
+    assert q.brush[0].level_db == p.brush[0].level_db - 12
+    assert q.brush[0].band_hz == (900.0, 5310.0)  # the upper edge falls as a layer's
+    assert q.brush[0].amp[1] == (32.956, 1.0)  # the rise lengthens by v^(−1/5), as a layer's
+    assert (q.brush[0].sweep, q.brush[0].rattle) == (p.brush[0].sweep, p.brush[0].rattle)

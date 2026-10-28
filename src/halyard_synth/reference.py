@@ -16,7 +16,8 @@ fixed at unity.
 Reference rates are absolute, not multiples of F: 128 × base (6.144 MHz for
 the 48 kHz family), with a convergence check at 256 × base. A reference
 counts only if the two agree 20 dB below the limits. The noise at the
-reference rate comes from exact FFT tables, one per layer.
+reference rate comes from exact FFT tables, one per layer and per band of a
+brush.
 
 The mask is applied in FFT segments with guard bands wide enough for its
 kernel to decay far below the error budget, and ŷ_F includes the kernel's
@@ -66,8 +67,9 @@ def mask(length: int, hi_rate: int, rate: int) -> Floats:
 
 
 def reference_tables(v: Voice, rate: int) -> list[Floats | None]:
-    """Return the exact noise tables at a reference rate, uncached: they are large and used once."""
-    return [noise.table(v.seed, *layer.band, rate) if layer.gain else None for layer in v.layers]
+    """Return the exact noise tables at a reference rate, as `voice.Tables` orders them, uncached: large, used once."""
+    layers = [noise.table(v.seed, *layer.band, rate) if layer.gain else None for layer in v.layers]
+    return layers + [noise.table(v.seed, *band, rate) for b in v.brushes for band in b.bands]
 
 
 def band_limited(v: Voice, rate: int, n_start: int, n_stop: int, m: int) -> Floats:

@@ -49,6 +49,10 @@ MIN_SPACING_MS = Decimal("0.01")  # 10 µs, compared on the decimal values as wr
 MAX_SEED = 2**63 - 1
 MAX_BURSTS = 10
 MAX_RIMS = 2
+MAX_BRUSHES = 1  # a brush's band takes up to seven noise tables
+SWEEP = (0.5, 2.0)  # a sweep's ratios, an octave either way
+SWEEP_TRAVEL = 2.0  # and an octave between its lowest and highest
+LOWEST_BAND_HZ = 20.0
 MAX_RIM_MODES = 8
 RIM_HZ = (100.0, 20000.0)  # where a rim's modes may lie
 PAIR = 2  # a knot, a mode and a band are pairs
@@ -83,6 +87,17 @@ class Layer:
     level_db: float
     band_hz: tuple[float, float]  # (low, high)
     rattle: float
+    amp: Knots  # ((ms, gain), ...)
+
+
+@dataclass(frozen=True)
+class Brush:
+    """A brush on the head: a noise layer whose band moves during the hit, by its sweep."""
+
+    level_db: float
+    band_hz: tuple[float, float]  # the band at sweep ratio 1
+    rattle: float
+    sweep: Knots  # ((ms, ratio), ...): the band's edges times the ratio
     amp: Knots  # ((ms, gain), ...)
 
 
@@ -122,6 +137,7 @@ class Patch:
     body: Body
     noise: tuple[Layer, ...]
     rim: tuple[Rim, ...]
+    brush: tuple[Brush, ...]
     drive: Drive
     output: Output
 
@@ -140,6 +156,7 @@ class Patch:
         it never lengthens the sound. With nothing audible the length is 0.
         """
         shapes = [(s.level_db, s.amp) for s in self.noise] + [(r.level_db, r.amp) for r in self.rim]
+        shapes += [(b.level_db, b.amp) for b in self.brush]
         ends = [amp[-1][0] for level_db, amp in shapes if level_db > -math.inf]
         if self.body.level_db > -math.inf:
             ends.append(self.body.amp[-1][0])
@@ -264,6 +281,11 @@ def _validate(p: Patch, problems: _Problems) -> None:
         problems.add("rim", "expected rims")
     else:
         _validate_rims(rim, problems)
+    brush: object = p.brush
+    if not isinstance(brush, tuple) or not all(isinstance(b, Brush) for b in brush):
+        problems.add("brush", "expected brushes")
+    else:
+        _validate_brushes(brush, problems)
     _validate_drive(p.drive, problems)
     _validate_output(p.output, problems)
 
@@ -362,6 +384,37 @@ def _validate_layer(layer: Layer, path: str, problems: _Problems) -> None:
     problems.shape(f"{path}.amp", layer.amp, MAX_NOISE_MS)
 
 
+def _validate_brushes(brushes: tuple[Brush, ...], problems: _Problems) -> None:
+    """Check the brushes: how many, and each, its band moved by its sweep."""
+    if len(brushes) > MAX_BRUSHES:
+        problems.add("brush", f"at most {MAX_BRUSHES} brush, found {len(brushes)}")
+    for j, b in enumerate(brushes, 1):
+        path = f"brush[{j}]"
+        _validate_layer(Layer(b.level_db, b.band_hz, b.rattle, b.amp), path, problems)
+        sweep = problems.knots(f"{path}.sweep", b.sweep, "ratio", 2, MAX_NOISE_MS)
+        if sweep is not None:
+            _validate_sweep(sweep, b.band_hz, path, problems)
+
+
+def _validate_sweep(sweep: list[tuple[float, float]], band: object, path: str, problems: _Problems) -> None:
+    """Check a sweep: ratios within 0.5 … 2, an octave apart at most, the band audible at every knot."""
+    outside = [(k, r) for k, (_, r) in enumerate(sweep, 1) if not SWEEP[0] <= r <= SWEEP[1]]
+    for k, r in outside:
+        problems.add(f"{path}.sweep[{k}].ratio", f"{r:g} is outside {SWEEP[0]:g} … {SWEEP[1]:g}")
+    if outside:
+        return
+    ratios = [r for _, r in sweep]
+    low, high = min(ratios), max(ratios)
+    if high / low > SWEEP_TRAVEL:
+        problems.add(f"{path}.sweep", f"travels {high / low:g} times, more than an octave")
+    # The band is extreme only at sweep knots, since each segment is monotone, so the knots suffice.
+    if isinstance(band, tuple) and len(band) == PAIR and all(isinstance(e, float) for e in band):
+        if band[0] * low < LOWEST_BAND_HZ:
+            problems.add(f"{path}.sweep", f"takes the low edge to {band[0] * low:g} Hz, below 20 Hz")
+        if band[1] * high > HIGHEST_HZ:
+            problems.add(f"{path}.sweep", f"takes the high edge to {band[1] * high:g} Hz, above 20 kHz")
+
+
 def _validate_rims(rims: tuple[Rim, ...], problems: _Problems) -> None:
     """Check the rims: how many, and each."""
     if len(rims) > MAX_RIMS:
@@ -422,7 +475,8 @@ _FIELDS = {
     "rim": ("level_db", "damping", "modes", "amp"),
     "drive": ("db",),
     "output": ("sample_rate", "format", "mode", "db", "polarity"),
-}
+}  # a [[brush]] has a layer's fields and its sweep
+_OPTIONAL = ("rim", "brush")  # arrays of tables that may be absent: none of them
 
 
 def _keys(problems: _Problems, prefix: str, table: dict[str, Any], expected: Sequence[str]) -> bool:
@@ -484,7 +538,7 @@ def _body(problems: _Problems, table: object) -> Body | None:
 
 
 def _layer(problems: _Problems, path: str, table: object) -> Layer | None:
-    """Build a layer; None after reporting what is wrong."""
+    """Build a layer, or the layer a brush sweeps; None after reporting what is wrong."""
     t = _section(problems, path, table, _FIELDS["noise"])
     if t is None:
         return None
@@ -526,6 +580,29 @@ def _noise(problems: _Problems, data: dict[str, Any]) -> tuple[Layer, ...] | Non
         return None
     _validate_layers(layers, problems)
     return layers
+
+
+def _brushes(problems: _Problems, data: dict[str, Any]) -> tuple[Brush, ...] | None:
+    """Build and check the brushes, none when there is no [[brush]]; None after reporting what is wrong."""
+    tables = data.get("brush", [])
+    if not isinstance(tables, list) or not all(isinstance(t, dict) for t in tables):
+        problems.add("brush", f"expected an array of tables ([[brush]]), found {_kind(tables)}")
+        return None
+    built = []
+    for j, table in enumerate(tables, 1):
+        path = f"brush[{j}]"
+        layer = _layer(problems, path, {k: v for k, v in table.items() if k != "sweep"})
+        sweep = None
+        if "sweep" not in table:
+            problems.add(f"{path}.sweep", "missing")
+        else:
+            sweep = _pairs(problems, f"{path}.sweep", table["sweep"], ("ms", "ratio"))
+        built.append(None if layer is None or sweep is None else (layer, sweep))
+    brushes = tuple(Brush(n.level_db, n.band_hz, n.rattle, s, n.amp) for n, s in (b for b in built if b))
+    if len(brushes) < len(built):
+        return None
+    _validate_brushes(brushes, problems)
+    return brushes
 
 
 def _rims(problems: _Problems, data: dict[str, Any]) -> tuple[Rim, ...] | None:
@@ -573,18 +650,18 @@ def from_dict(data: object) -> Patch:
         raise PatchError(["expected a table"])
     _header(data)
     problems = _Problems()
-    _keys(problems, "", {k: v for k, v in data.items() if k != "rim"}, _FIELDS[""])  # [[rim]] is optional
+    _keys(problems, "", {k: v for k, v in data.items() if k not in _OPTIONAL}, _FIELDS[""])
     if "seed" in data:
         _validate_seed(data["seed"], problems)
     body = _body(problems, data["body"]) if "body" in data else None
     if body is not None:
         _validate_body(body, problems)
-    noise, rim = _noise(problems, data), _rims(problems, data)
+    noise, rim, brush = _noise(problems, data), _rims(problems, data), _brushes(problems, data)
     drive, output = _drive(problems, data), _output(problems, data)
     # Anything missing or unbuilt has been reported, so with no problem every part is there and checked.
-    if problems or body is None or noise is None or rim is None or drive is None or output is None:
+    if problems or body is None or noise is None or rim is None or brush is None or drive is None or output is None:
         raise PatchError(problems)
-    return Patch(data["seed"], body, noise, rim, drive, output)
+    return Patch(data["seed"], body, noise, rim, brush, drive, output)
 
 
 def loads(text: str) -> Patch:
@@ -650,6 +727,22 @@ def to_dict(p: Patch) -> dict[str, Any]:
             if p.rim
             else {}
         ),
+        **(
+            {
+                "brush": [
+                    {
+                        "level_db": b.level_db,
+                        "band_hz": list(b.band_hz),
+                        "rattle": b.rattle,
+                        "sweep": [{"ms": m, "ratio": r} for m, r in b.sweep],
+                        "amp": [{"ms": m, "gain": g} for m, g in b.amp],
+                    }
+                    for b in p.brush
+                ],
+            }
+            if p.brush
+            else {}
+        ),
         "drive": {"db": p.drive.db},
         "output": {
             "sample_rate": p.output.sample_rate,
@@ -708,6 +801,21 @@ def dumps(p: Patch) -> str:
         )
         lines += _array("modes", [(("hz", hz), ("level_db", v)) for hz, v in r.modes], "loudest mode exactly 0 dB")
         lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in r.amp], "")
+    for j, brush in enumerate(p.brush, 1):
+        lines += ["", _note("[[brush]]", f"brush[{j}]: a noise layer whose band moves")]
+        lines += _rows(
+            [
+                ("level_db", _f(brush.level_db), ""),
+                ("band_hz", f"[{_f(brush.band_hz[0])}, {_f(brush.band_hz[1])}]", "at sweep ratio 1"),
+                ("rattle", _f(brush.rattle), "0 … 1, gated at the body's fundamental"),
+            ],
+        )
+        lines += _array(
+            "sweep",
+            [(("ms", m), ("ratio", r)) for m, r in brush.sweep],
+            "the band's edges times the ratio",
+        )
+        lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in brush.amp], "")
     lines += ["", "[drive]", *_rows([("db", _f(p.drive.db), "small-signal gain; 0 = bypass")])]
     lines += ["", "[output]"]
     lines += _rows(
@@ -818,8 +926,10 @@ def tune(p: Patch, text: str) -> Patch:
 
 def curve_names(p: Patch) -> tuple[str, ...]:
     """Name every curve of the patch by its path."""
-    noise = (f"noise[{j}].amp" for j in range(1, len(p.noise) + 1))
-    return ("body.pitch", "body.amp", *noise, *(f"rim[{j}].amp" for j in range(1, len(p.rim) + 1)))
+    noise = [f"noise[{j}].amp" for j in range(1, len(p.noise) + 1)]
+    rims = [f"rim[{j}].amp" for j in range(1, len(p.rim) + 1)]
+    brushes = [f"brush[{j}].{c}" for j in range(1, len(p.brush) + 1) for c in ("sweep", "amp")]
+    return ("body.pitch", "body.amp", *noise, *rims, *brushes)
 
 
 def curve_knots(p: Patch, name: str) -> Knots:
@@ -830,6 +940,9 @@ def curve_knots(p: Patch, name: str) -> Knots:
         return p.body.amp
     if name.startswith("rim["):
         return p.rim[int(name[len("rim[") : name.index("]")]) - 1].amp
+    if name.startswith("brush["):
+        b = p.brush[int(name[len("brush[") : name.index("]")]) - 1]
+        return b.sweep if name.endswith(".sweep") else b.amp
     return p.noise[_layer_index(p, name[: -len(".amp")])].amp
 
 
@@ -848,7 +961,15 @@ def _set_curves(p: Patch, curves: dict[str, Knots]) -> Patch:
         dataclasses.replace(r, amp=curves[f"rim[{j}].amp"]) if f"rim[{j}].amp" in curves else r
         for j, r in enumerate(p.rim, 1)
     )
-    return dataclasses.replace(p, body=body, noise=noise, rim=rim)
+    brush = tuple(
+        dataclasses.replace(
+            b,
+            sweep=curves.get(f"brush[{j}].sweep", b.sweep),
+            amp=curves.get(f"brush[{j}].amp", b.amp),
+        )
+        for j, b in enumerate(p.brush, 1)
+    )
+    return dataclasses.replace(p, body=body, noise=noise, rim=rim, brush=brush)
 
 
 def _layer_index(p: Patch, name: str) -> int:
@@ -861,10 +982,11 @@ def _layer_index(p: Patch, name: str) -> int:
 
 
 def stretch(p: Patch, curves: str | Iterable[str], factor: float, after_ms: float | None = None) -> Patch:
-    """Rescale knot times after each curve's peak (0 ms for pitch), or after `after_ms`, by `factor`.
+    """Rescale knot times after each curve's peak (0 ms for pitch and sweeps), or after `after_ms`, by `factor`.
 
-    `curves` names curves by path (`body.amp`, `body.pitch`, `noise[2].amp`);
-    `all` names every amplitude shape. Times are rewritten to 1 µs.
+    `curves` names curves by path (`body.amp`, `body.pitch`, `noise[2].amp`,
+    `brush[1].sweep`); `all` names every amplitude shape. Times are rewritten
+    to 1 µs.
     """
     if not (math.isfinite(factor) and factor > 0):
         raise PatchError([f"stretch: the factor must be a positive number, found {factor!r}"])
@@ -884,7 +1006,7 @@ def stretch(p: Patch, curves: str | Iterable[str], factor: float, after_ms: floa
         if after_ms is not None:
             anchor = after_ms
         else:
-            anchor = 0.0 if name == "body.pitch" else next(ms for ms, g in knots if g == 1.0)
+            anchor = next(ms for ms, g in knots if g == 1.0) if name.endswith(".amp") else 0.0
         a, f = _dec(anchor), Decimal(repr(float(factor)))
         out[name] = tuple((ms if ms <= anchor else _ms(a + f * (_dec(ms) - a)), v) for ms, v in knots)
     return _set_curves(p, out)
@@ -1035,7 +1157,7 @@ def softer(p: Patch, db: float, glide: float = 2.0, contact: float = 0.2) -> Pat
       * Level: every source level falls by db (silent sources stay silent).
       * Glide: the pitch curve's excess over 1 scales by v^glide.
       * Contact: every rise lengthens by v^(−contact), later knots shifting by
-        the added time, and every layer's upper band edge scales by v^contact.
+        the added time, and every layer's and brush's upper band edge scales by v^contact.
     Nothing else changes. An exponent of 0 turns its rule off. Values are
     written to 1 µs, ratios to 6 decimals, band edges to 0.1 Hz and levels to
     6 decimals of a dB.
@@ -1051,28 +1173,25 @@ def softer(p: Patch, db: float, glide: float = 2.0, contact: float = 0.2) -> Pat
         """Lower a level by db, keeping silence silent, to 6 decimals."""
         return x if x == -math.inf else float(round(_dec(x) - Decimal(repr(float(db))), 6))
 
+    def rises(amp: Knots) -> Knots:
+        """Lengthen a shape's rises by contact."""
+        return _lengthen_rises(amp, Decimal(repr(v**-contact))) if contact else amp
+
+    def struck[L: (Layer, Brush)](layer: L) -> L:
+        """Strike a layer or a brush softer: its level, its rises and, by contact, its upper band edge."""
+        lo, hi = layer.band_hz
+        band = (lo, float(round(_dec(hi) * Decimal(repr(v**contact)), 1)) if contact else hi)
+        return dataclasses.replace(layer, level_db=level(layer.level_db), band_hz=band, amp=rises(layer.amp))
+
     b = p.body
     pitch = b.pitch
     if glide:
         scale = Decimal(repr(v**glide))
         pitch = tuple((ms, float(round(1 + (_dec(r) - 1) * scale, 6))) for ms, r in b.pitch)
-    body_amp = b.amp
-    layers = []
-    for layer in p.noise:
-        amp, band = layer.amp, layer.band_hz
-        if contact:
-            amp = _lengthen_rises(amp, Decimal(repr(v**-contact)))
-            band = (band[0], float(round(_dec(band[1]) * Decimal(repr(v**contact)), 1)))
-        layers.append(dataclasses.replace(layer, level_db=level(layer.level_db), band_hz=band, amp=amp))
-    rims = [
-        dataclasses.replace(
-            r,
-            level_db=level(r.level_db),
-            amp=_lengthen_rises(r.amp, Decimal(repr(v**-contact))) if contact else r.amp,
-        )
-        for r in p.rim
-    ]
-    if contact:
-        body_amp = _lengthen_rises(b.amp, Decimal(repr(v**-contact)))
-    body = dataclasses.replace(b, level_db=level(b.level_db), pitch=pitch, amp=body_amp)
-    return dataclasses.replace(p, body=body, noise=tuple(layers), rim=tuple(rims))
+    return dataclasses.replace(
+        p,
+        body=dataclasses.replace(b, level_db=level(b.level_db), pitch=pitch, amp=rises(b.amp)),
+        noise=tuple(struck(layer) for layer in p.noise),
+        rim=tuple(dataclasses.replace(r, level_db=level(r.level_db), amp=rises(r.amp)) for r in p.rim),
+        brush=tuple(struck(brush) for brush in p.brush),
+    )

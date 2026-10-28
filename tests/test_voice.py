@@ -14,7 +14,7 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.optimize import least_squares
 
 from halyard_synth import noise, voice
-from halyard_synth.curve import amplitude_curve, compressed, pitch_curve
+from halyard_synth.curve import Curve, amplitude_curve, compressed, pitch_curve
 from halyard_synth.patch import Patch, loads
 
 from .conftest import EXAMPLE, make
@@ -68,6 +68,33 @@ def rim(
     ]
 
 
+def brush(
+    band: tuple[float, float] = (900.0, 7000.0),
+    sweep: tuple[tuple[float, float], ...] = ((0, 1.0), (60, 1.6), (180, 0.9)),
+    *,
+    level_db: float = -3.0,
+    rattle: float = 0.0,
+    shape: Knots | None = None,
+) -> list[dict[str, object]]:
+    """Write one [[brush]] as TOML parses it."""
+    return [
+        {
+            "level_db": level_db,
+            "band_hz": list(band),
+            "rattle": rattle,
+            "sweep": [{"ms": m, "ratio": r} for m, r in sweep],
+            "amp": shape or amp((0, 0), (25, 1), (120, 0.5), (240, 0)),
+        },
+    ]
+
+
+def b_spline(x: ArrayLike) -> Floats:
+    """Return the cubic B-spline by its definition: the fourth difference of x₊³, over 6."""
+    y = np.asarray(x, dtype=float) + 2
+    out: Floats = sum(((-1) ** j * math.comb(4, j) * np.maximum(y - j, 0) ** 3 for j in range(5)), np.zeros_like(y)) / 6
+    return out
+
+
 def silent_layers(**edits: object) -> dict[str, object]:
     """Return edits that silence both layers, and these."""
     return {"noise[1].level_db": -math.inf, "noise[2].level_db": -math.inf, **edits}
@@ -95,6 +122,18 @@ def x_exact(p: Patch, times: ArrayLike) -> Floats:
             for hz, level in r.modes:
                 e = compressed(er, (hz / r.modes[0][0]) ** r.damping)
                 x += 10 ** (r.level_db / 20) * 10 ** (level / 20) * e(t) * np.sin(2 * np.pi * hz * t)
+    for br in p.brush:
+        if br.level_db > -math.inf:
+            e = amplitude_curve([m / 1000 for m, _ in br.amp], [g for _, g in br.amp])
+            s = Curve.pchip([m / 1000 for m, _ in br.sweep], [r for _, r in br.sweep], first=0.0, last=0.0)
+            u = 3 * np.log2(s(t))
+            q = 1 - br.rattle * eb(t) * (1 - np.cos(2 * np.pi * b.tune_hz * turns)) / 2
+            lo, hi = br.band_hz
+            blend = sum(
+                (b_spline(u - k) * noise.at(p.seed, lo * 2 ** (k / 3), hi * 2 ** (k / 3), t) for k in range(-6, 7)),
+                np.zeros_like(t),
+            )
+            x += 10 ** (br.level_db / 20) * e(t) * q * blend
     return x
 
 
@@ -165,6 +204,9 @@ def test_slope_and_curvature_are_the_derivatives() -> None:
         {"noise[1].level_db": -math.inf, "seed": 2**63 - 1},
         {"rim": rim((1630, 0), (4210, -8), (9870, -20))},
         {"rim": [*rim((440, -3), (2500, 0), damping=2.5), *rim((700, 0), level_db=-math.inf)], "drive.db": 24.0},
+        {"brush": brush(), "noise[2].level_db": -math.inf},
+        {"brush": brush((300.0, 2500.0), ((10, 2.0), (90, 1.0)), rattle=0.7), "drive.db": 12.0},
+        {"brush": brush(level_db=-math.inf)},
     ],
 )
 def test_sources_are_the_model(edits: dict[str, object]) -> None:
@@ -541,7 +583,23 @@ KINKY_RIM = {
 }
 
 
-@pytest.mark.parametrize("kinky", [KINKY, KINKY_RIM], ids=["body and layers", "with a rim"])
+KINKY_BRUSH = {
+    **KINKY,
+    # Sweeping across three whole numbers of u, from 1.3 down to 0.75: every kind of brush jump.
+    "brush": brush(
+        (1500.0, 6000.0),
+        ((0.5, 1.3), (2.0, 0.75), (4.5, 1.1)),
+        rattle=0.5,
+        shape=amp((0.1, 0), (0.6, 1), (2.5, 0.4), (8, 0)),
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "kinky",
+    [KINKY, KINKY_RIM, KINKY_BRUSH],
+    ids=["body and layers", "with a rim", "with a brush"],
+)
 def test_every_jump_matches_the_model(kinky: dict[str, object]) -> None:
     """Find each knot's jumps in x″ and x‴ as one-sided derivatives of the model measure them."""
     p = make(**kinky)
@@ -632,3 +690,90 @@ def test_example_patch_kinks_are_dominated_by_the_stick() -> None:
     v = voice.voice(loads(EXAMPLE))
     top = voice.kink_knots(voice.kink_terms(v, RATE), v.alpha, RATE, BAND)[0][0]
     assert top.startswith("noise[1].amp")
+
+
+# Brushes.
+
+
+def test_a_brush_band_keeps_its_shape_and_level_all_along_its_sweep() -> None:
+    """Find a brush's blended band within 0.5 dB of the written one down to −30 dB, and its level within 0.1 dB."""
+    rng = np.random.default_rng(3)
+    for _ in range(40):
+        lo = float(np.exp(rng.uniform(np.log(20), np.log(15000))))
+        hi = float(np.exp(rng.uniform(np.log(lo * 1.0005), np.log(20000))))
+
+        def amplitudes(k: float, lo: float = lo, hi: float = hi) -> Floats:
+            out: Floats = noise.amplitudes(0, lo * 2 ** (k / 3), hi * 2 ** (k / 3))[0] / noise.coefficients(0)[0]
+            return out
+
+        basis = {k: amplitudes(k) for k in range(-6, 7)}
+        for u in rng.uniform(-1, 1, 6):
+            blend = sum((b_spline(u - k) * a for k, a in basis.items()), np.zeros(noise.COMPONENTS))
+            want = amplitudes(u)
+            audible = want >= 10 ** (-30 / 20) * want.max()
+            assert np.max(np.abs(20 * np.log10(blend[audible] / want[audible]))) <= BAND_SHAPE_DB
+            assert abs(10 * np.log10(np.sum(blend**2) / np.sum(want**2))) <= BAND_LEVEL_DB
+
+
+def test_bspline_and_its_derivatives() -> None:
+    """Find the B-spline its definition, its derivatives its slopes, and its third derivative's jumps as recorded."""
+    x = np.linspace(-2.5, 2.5, 1001) + 0.0013  # off the knots, where B″ has corners
+    value, d1, d2 = voice.bspline(x)
+    np.testing.assert_allclose(value, b_spline(x), rtol=0, atol=1e-14)
+    h = 1e-6
+    np.testing.assert_allclose(d1, (b_spline(x + h) - b_spline(x - h)) / (2 * h), rtol=0, atol=1e-8)
+    np.testing.assert_allclose(d2, (voice.bspline(x + h)[1] - voice.bspline(x - h)[1]) / (2 * h), rtol=0, atol=1e-6)
+    for knot, jump in voice.B3_JUMPS.items():
+        after = (voice.bspline(np.array([knot + 2 * h]))[2] - voice.bspline(np.array([knot + h]))[2]) / h
+        before = (voice.bspline(np.array([knot - h]))[2] - voice.bspline(np.array([knot - 2 * h]))[2]) / h
+        assert float(after[0] - before[0]) == pytest.approx(jump, abs=1e-6)
+
+
+def test_a_brush_reads_only_the_tables_its_sweep_reaches() -> None:
+    """Find a brush's tables after the layers', the bands its sweep reaches by third-octaves, none when it is silent."""
+    v = voice.voice(make(brush=brush(sweep=((0, 1.0), (60, 1.6), (180, 0.9)))))
+    b = v.brushes[0]
+    # u runs from 3 log2 0.9 = −0.46 to 3 log2 1.6 = 2.03: B(u − k) is nonzero for k = −2 … 4.
+    assert (b.first, len(b.bands)) == (-2, 7)
+    assert b.bands[2] == (900.0, 7000.0)
+    assert b.bands[3] == pytest.approx((900.0 * 2 ** (1 / 3), 7000.0 * 2 ** (1 / 3)))
+    tabs = voice.tables(v, RATE)
+    assert len(tabs) == len(v.layers) + len(b.bands)
+    assert voice.brush_tables(v, tabs)[0][2] is noise.tables(v.seed, [b.bands[2]], RATE)[0]
+    silent = voice.voice(make(brush=brush(level_db=-math.inf)))
+    assert silent.brushes[0].bands == ()
+    assert voice.brush_tables(silent, voice.tables(silent, RATE)) == [[]]
+
+
+def test_crossings_are_where_u_meets_a_whole_number() -> None:
+    """Find every time u = 3 log2 s is a whole number, each once, a crossing at a knot included, and its segment."""
+    s1 = 2 ** (1 / 3)
+    v = voice.voice(make(brush=brush(sweep=((0, 1.0), (40, 1.3), (80, s1), (120, 0.75), (160, 0.75)))))
+    b = v.brushes[0]
+    tau, levels, segments = voice.crossings(b)
+    # From u = 0 up to 1.14, down through 1 (at a knot) to −1.25, then held.
+    assert levels.tolist() == [0, 1, 1, 0, -1]
+    assert segments.tolist() == [0, 0, 1, 2, 2]
+    assert tau[0] == 0.0
+    assert tau[2] == pytest.approx(0.08)
+    np.testing.assert_allclose(b.u(tau), levels, rtol=0, atol=1e-9)
+
+
+BAND_SHAPE_DB = 0.5  # a brush's band keeps the written band's shape to this, down to −30 dB
+BAND_LEVEL_DB = 0.1  # and its level to this
+
+
+def test_a_brush_kinks_where_its_shape_and_sweep_do_and_a_silent_one_nowhere() -> None:
+    """Name a brush's knots in the kink terms, its sweep's crossings among them, and none for a silent brush."""
+    swept = voice.kink_terms(voice.voice(make(**KINKY_BRUSH)), RATE)
+    paths = set(swept.paths)
+    assert {"brush[1].amp[2]", "brush[1].sweep[1]", "brush[1].sweep[2]", "brush[1].sweep[3]"} <= paths
+    # A held sweep crosses nothing: only its knots, with nothing to jump.
+    p = make(brush=brush(sweep=((0, 1.1), (90, 1.1))))
+    held = voice.kink_terms(voice.voice(p), RATE)
+    rows = [i for i, path in enumerate(held.paths) if path.startswith("brush[1].sweep")]
+    assert len(rows) == len(p.brush[0].sweep)
+    assert not np.any(held.d2[rows])
+    assert not np.any(held.d3[rows])
+    silent = voice.kink_terms(voice.voice(make(brush=brush(level_db=-math.inf))), RATE)
+    assert not any(path.startswith("brush") for path in silent.paths)

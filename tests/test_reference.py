@@ -134,6 +134,33 @@ def test_kink_bound_holds_for_a_rim(rise_ms: float, hz: tuple[float, ...]) -> No
     assert v.error.max_abs >= bound / USEFUL
 
 
+@pytest.mark.parametrize("rise_ms", [0.02, 25.0])
+@pytest.mark.parametrize("sweep", [((0, 1.0), (60, 1.6), (180, 0.9)), ((0, 0.5), (2, 1.0))], ids=["slow", "fast"])
+def test_kink_bound_holds_for_a_brush(rise_ms: float, sweep: tuple[tuple[float, float], ...]) -> None:
+    """Find a sweeping brush matching its reference, and the kink bound above its error and within 100 of it."""
+    p = make(
+        **{
+            "body.level_db": -math.inf,
+            "noise[1].level_db": -math.inf,
+            "noise[2].level_db": -math.inf,
+            "brush": [
+                {
+                    "level_db": 0.0,
+                    "band_hz": [900.0, 9000.0],
+                    "rattle": 0.0,
+                    "sweep": [{"ms": m, "ratio": r} for m, r in sweep],
+                    "amp": amp((0, 0), (rise_ms, 1), (120, 0.5), (240, 0)),
+                },
+            ],
+        },
+    )
+    v = reference.verify_take(p)
+    bound = synthesize(p).kink
+    assert v.passed
+    assert v.error.max_abs <= bound
+    assert v.error.max_abs >= bound / USEFUL
+
+
 def test_verify_judges_every_take() -> None:
     """Verify two takes: seeds 1 and 2, each reported, and the count that pass."""
     v = reference.verify(make(**{"noise[2].level_db": 0.0, "drive.db": 12.0}), takes=2)

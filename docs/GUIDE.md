@@ -113,6 +113,28 @@ quiet body and no wires, its modes lower and its shape a few milliseconds
 long. `halyard softer` lowers a rim's level and lengthens its rises like the
 others'; `halyard stretch` names its shape `rim[1].amp`.
 
+### Brush
+
+One `[[brush]]` table, or none: a noise layer whose band moves during the hit,
+as wire bristles sweep across a head. It has a layer's fields, and a sweep:
+
+| Field | Range | What it does |
+|---|---|---|
+| `level_db` | −inf, −90 – +24 | The brush's level. |
+| `band_hz` | 20 ≤ low < high ≤ 20,000 | The band at sweep ratio 1. |
+| `rattle` | 0 – 1 | As a layer's: the wires answer a brush too. |
+| `sweep` | 2 – 32 knots | `{ ms, ratio }`, within 1 s: both band edges times the ratio, 0.5 – 2, an octave between the lowest and the highest at most. Held before its first knot and after its last, which it leaves and reaches smoothly. |
+| `amp` | 3 – 32 knots | The brush's shape, within 1 s. |
+
+The band stays within 20 Hz – 20 kHz at every ratio, or the patch is refused.
+The moving band is one noise filtered, not a crossfade of noises: it keeps the
+written band's shape to within 0.5 dB and its level to within 0.1 dB all along
+the sweep. A **sweep** is a long, slow brush rising and falling through a few
+semitones; a **swish** is a shorter one with a quicker sweep; a brush **tap**
+is a short layer, needing no sweep. `halyard stretch` names the sweep
+`brush[1].sweep` and stretches it from 0 ms; `halyard softer` treats the brush
+as a layer and leaves its sweep alone.
+
 ### Drive
 
 `drive.db`, 0 – 48 dB, is the small-signal gain of a tanh saturator on the sum

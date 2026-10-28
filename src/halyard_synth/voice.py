@@ -8,11 +8,17 @@
     b(t)   = Σ_i g_b a_i E_i(t) sin φ_i(t),    φ_i = r_i φ_1,    φ_1 = 2π f0 R(t),    R(t) = ∫_0^t r
     w_j(t) = g_j e_j(t) q_j(t) n_j(t),    q_j = 1 − d_j e_b(t) (1 − cos φ_1(t)) / 2
     c_k(t) = Σ_i g_k a_ki E_ki(t) sin 2π f_ki t
+    v_j(t) = g_j e_j(t) q_j(t) Σ_k B(u_j(t) − k) n_jk(t),    u_j = 3 log2 s_j(t)
 
 E_i is the body shape e_b with its decay compressed by s_i = r_i^β, itself a
 Hermite curve (`curve.compressed`), and q_j is layer j's rattle, gated at the
 body's fundamental. The rim k rings at its own frequencies f_ki, unglided, its
-shape compressed by (f_ki / f_k1)^β_k in the same way. Nothing here keeps state: sample n at rate F is computed
+shape compressed by (f_ki / f_k1)^β_k in the same way. A brush v_j is a layer
+whose band moves with its sweep s_j: n_jk is the same noise in the brush's band
+moved by k third-octaves, and the cubic B-spline B blends them as u_j moves.
+Being one noise, the blend is a filter, not a crossfade: all along the sweep
+the band keeps the written band's shape within 0.5 dB, down to 30 dB below its
+peak, and its level within 0.1 dB. Nothing here keeps state: sample n at rate F is computed
 from t_n = n / F alone, so a block boundary, a longer render or a different
 rate never changes a sample's value.
 """
@@ -37,10 +43,12 @@ if TYPE_CHECKING:
     from .patch import Patch
 
     type Floats = NDArray[np.float64]
-    type Tables = Sequence[Floats | None]  # per layer: its noise table, or None for a silent layer
+    # Per layer, its noise table or None for a silent layer; then each audible brush's tables, in order.
+    type Tables = Sequence[Floats | None]
 
 BLOCK = 2**16
 TWO_PI = 2 * math.pi
+STEPS = 3  # a brush's tables per octave of its sweep
 
 
 def drive_alpha(db: float) -> float:
@@ -90,6 +98,23 @@ class Layer:
 
 
 @dataclass(frozen=True)
+class Brush:
+    """A brush: its gain, its rattle depth and shape, its sweep, and the bands of its tables."""
+
+    gain: float  # g_j; 0 when the brush is silent
+    rattle: float
+    amp: Curve
+    sweep: Curve  # s_j, the ratio its band's edges are multiplied by
+    first: int  # the first table's k
+    bands: tuple[tuple[float, float], ...]  # table k − first: the band moved by k third-octaves; none when silent
+
+    def u(self, t: Floats, *, on: bool = False) -> Floats:
+        """Return u = 3 log2 s at times, ascending ones `on` the sweep's segments."""
+        out: Floats = STEPS * np.log2(self.sweep.on(t) if on else self.sweep(t))
+        return out
+
+
+@dataclass(frozen=True)
 class Voice:
     """The patch reduced to what synthesis needs; times in seconds."""
 
@@ -100,6 +125,7 @@ class Voice:
     modes: tuple[Mode, ...]
     layers: tuple[Layer, ...]  # in patch order, silent ones included, so paths keep their numbers
     rings: tuple[Ring, ...]  # every rim's modes, in patch order
+    brushes: tuple[Brush, ...]
     alpha: float
     t_src: float
 
@@ -109,9 +135,14 @@ class Voice:
         return any(m.gain for m in self.modes)
 
     @property
+    def carriers(self) -> tuple[Layer | Brush, ...]:
+        """The layers, then the brushes: every source of noise, numbered as `State.parts` numbers them."""
+        return (*self.layers, *self.brushes)
+
+    @property
     def rattles(self) -> bool:
-        """Some audible layer reads the body's shape and phase."""
-        return any(layer.gain and layer.rattle for layer in self.layers)
+        """Some audible layer or brush reads the body's shape and phase."""
+        return any(c.gain and c.rattle for c in self.carriers)
 
 
 def _seconds(knots: Iterable[tuple[float, float]]) -> list[float]:
@@ -139,6 +170,24 @@ def voice(p: Patch) -> Voice:
             Ring(k, hz, g_k * 10.0 ** (level / 20.0), compressed(rim_amp, (hz / first) ** r.damping))
             for hz, level in r.modes
         ]
+    brushes = []
+    for pb in p.brush:
+        ratios = [r for _, r in pb.sweep]
+        # Each segment of the sweep is monotone, so u is extreme at its knots: B(u − k) is 0 for k outside.
+        first, last = math.floor(STEPS * math.log2(min(ratios))) - 1, math.ceil(STEPS * math.log2(max(ratios))) + 1
+        lo, hi = pb.band_hz
+        audible = pb.level_db > -math.inf
+        bands = tuple((lo * 2.0 ** (k / STEPS), hi * 2.0 ** (k / STEPS)) for k in range(first, last + 1))
+        brushes.append(
+            Brush(
+                10.0 ** (pb.level_db / 20.0),
+                pb.rattle,
+                amplitude_curve(_seconds(pb.amp), [g for _, g in pb.amp]),
+                Curve.pchip(_seconds(pb.sweep), ratios, first=0.0, last=0.0),
+                first,
+                bands if audible else (),
+            ),
+        )
     return Voice(
         seed=p.seed,
         f0=b.tune_hz,
@@ -147,6 +196,7 @@ def voice(p: Patch) -> Voice:
         modes=modes,
         layers=layers,
         rings=tuple(rings),
+        brushes=tuple(brushes),
         alpha=drive_alpha(p.drive.db),
         t_src=p.length_ms / 1000,
     )
@@ -163,10 +213,37 @@ def sample_count(t_src: float, rate: int) -> int:
 
 
 def tables(v: Voice, rate: int) -> list[Floats | None]:
-    """Return each layer's noise table at the internal rate (None for silent layers), computed together and cached."""
-    audible = [layer for layer in v.layers if layer.gain]
-    found = iter(noise.tables(v.seed, [layer.band for layer in audible], rate)) if audible else iter(())
-    return [next(found) if layer.gain else None for layer in v.layers]
+    """Return the noise tables at the internal rate, as `Tables` orders them, computed together and cached."""
+    bands = [layer.band for layer in v.layers if layer.gain] + [band for b in v.brushes for band in b.bands]
+    found = iter(noise.tables(v.seed, bands, rate)) if bands else iter(())
+    out = [next(found) if layer.gain else None for layer in v.layers]
+    return out + list(found)
+
+
+def brush_tables(v: Voice, tabs: Tables) -> list[list[Floats]]:
+    """Return each brush's tables, none for a silent brush."""
+    out, i = [], len(v.layers)
+    for b in v.brushes:
+        out.append([t for t in tabs[i : i + len(b.bands)] if t is not None])
+        i += len(b.bands)
+    return out
+
+
+B_REACH = 2  # B is 0 from here out
+
+
+def bspline(x: Floats) -> tuple[Floats, Floats, Floats]:
+    """Return the cubic B-spline B(x), on [−2, 2], with its first and second derivatives: C², B‴ steps."""
+    a = np.abs(x)
+    inner, outer = a < 1, (a >= 1) & (a < B_REACH)
+    c = np.where(outer, 2 - a, 0.0)
+    value = np.where(inner, 2 / 3 - a * a + a**3 / 2, c**3 / 6)
+    d1 = np.where(inner, -2 * x + 1.5 * x * a, -np.sign(x) * c * c / 2)
+    d2 = np.where(inner, -2 + 3 * a, c)
+    return value, d1, d2
+
+
+B3_JUMPS = {-2: 1.0, -1: -4.0, 0: 6.0, 1: -4.0, 2: 1.0}  # B‴'s jumps at its knots
 
 
 def _span(t: Floats, lo: float, hi: float) -> slice:
@@ -183,27 +260,44 @@ def sources(v: Voice, rate: int, n0: int, n1: int, tabs: Tables) -> Floats:
     """Return x[n] = x(n / rate) for n0 ≤ n < n1; each source only over its support."""
     t = np.arange(n0, n1) / rate
     x = np.zeros(n1 - n0)
-    shared, gate = _body(v, t, x)
-    for layer, table in zip(v.layers, tabs, strict=True):
-        if table is None:  # a silent layer
-            continue
+    rattle = _body(v, t, x)
+    for layer, table in zip(v.layers, tabs, strict=False):  # the brushes' tables follow
         s = _support(t, layer.amp)
-        if s.start >= s.stop:
-            continue
-        env = layer.gain * layer.amp.on(t[s])
-        if layer.rattle and gate is not None:
-            # The gate is defined on the shared span; outside it the body shape is 0 and so is the gate.
-            a, b = max(s.start, shared.start), min(s.stop, shared.stop)
-            if a < b:
-                env[a - s.start : b - s.start] *= 1.0 - layer.rattle * gate[a - shared.start : b - shared.start]
-        a, b = n0 + s.start, n0 + s.stop
-        # Noise shapes end by 1 s, the table's period, so the index wraps only for a knot at exactly 1 s.
-        x[s] += env * (table[a:b] if b <= rate else table[np.arange(a, b) % rate])
+        if table is not None and s.start < s.stop:  # None: a silent layer
+            x[s] += _envelope(layer, t, s, rattle) * _read(table, rate, n0, s)
+    for brush, basis in zip(v.brushes, brush_tables(v, tabs), strict=True):
+        s = _support(t, brush.amp)
+        if basis and s.start < s.stop:  # none: a silent brush
+            u = brush.u(t[s], on=True)
+            blend = np.zeros(s.stop - s.start)
+            for k, table in enumerate(basis, brush.first):
+                blend += bspline(u - k)[0] * _read(table, rate, n0, s)
+            x[s] += _envelope(brush, t, s, rattle) * blend
     for ring in v.rings:
         if ring.gain:
             s = _support(t, ring.env)
             x[s] += ring.gain * ring.env.on(t[s]) * np.sin((TWO_PI * ring.hz) * t[s])
     return x
+
+
+def _envelope(c: Layer | Brush, t: Floats, s: slice, rattle: tuple[slice, Floats | None]) -> Floats:
+    """Return g e q over s: a layer's or a brush's gain and shape, and its rattle from the body's gate."""
+    env = c.gain * c.amp.on(t[s])
+    shared, gate = rattle
+    if c.rattle and gate is not None:
+        # The gate is defined on the shared span; outside it the body shape is 0 and so is the gate.
+        a, b = max(s.start, shared.start), min(s.stop, shared.stop)
+        if a < b:
+            env[a - s.start : b - s.start] *= 1.0 - c.rattle * gate[a - shared.start : b - shared.start]
+    return env
+
+
+def _read(table: Floats, rate: int, n0: int, s: slice) -> Floats:
+    """Return a noise table over s, the block starting at sample n0."""
+    a, b = n0 + s.start, n0 + s.stop
+    # Noise shapes end by 1 s, the table's period, so the index wraps only for a knot at exactly 1 s.
+    out: Floats = table[a:b] if b <= rate else table[np.arange(a, b) % rate]
+    return out
 
 
 def _body(v: Voice, t: Floats, x: Floats) -> tuple[slice, Floats | None]:
@@ -212,10 +306,10 @@ def _body(v: Voice, t: Floats, x: Floats) -> tuple[slice, Floats | None]:
     lo, hi = math.inf, -math.inf
     if v.body_sounds:
         lo, hi = v.body_amp.t[0], v.body_amp.t[-1]
-    for layer in v.layers:
-        if layer.gain and layer.rattle:
-            lo = min(lo, max(layer.amp.t[0], v.body_amp.t[0]))
-            hi = max(hi, min(layer.amp.t[-1], v.body_amp.t[-1]))
+    for c in v.carriers:
+        if c.gain and c.rattle:
+            lo = min(lo, max(c.amp.t[0], v.body_amp.t[0]))
+            hi = max(hi, min(c.amp.t[-1], v.body_amp.t[-1]))
     shared = _span(t, lo, hi) if lo <= hi else slice(0, 0)
     tb = t[shared]
     gate = None
@@ -389,7 +483,7 @@ class State:
     deb: Floats
     x: Floats
     dx: Floats
-    parts: dict[int, Part]  # by layer index, from 0: the audible layers
+    parts: dict[int, Part]  # by carrier index, from 0: the audible layers and brushes, n the blend of a brush's
 
 
 def state(v: Voice, times: ArrayLike, rate: int, tabs: Tables) -> State:
@@ -406,18 +500,23 @@ def state(v: Voice, times: ArrayLike, rate: int, tabs: Tables) -> State:
             sn, cs = np.sin(m.ratio * phi1), np.cos(m.ratio * phi1)
             x += m.gain * e * sn
             dx += m.gain * (de * sn + e * cs * m.ratio * dphi1)
+    noises: dict[int, tuple[Floats, Floats]] = {}
+    for j, table in enumerate(tabs[: len(v.layers)]):
+        if table is not None:  # None: a silent layer
+            noises[j] = noise.interpolate(table, rate, t)
+    for i, (brush, basis) in enumerate(zip(v.brushes, brush_tables(v, tabs), strict=True)):
+        if basis:  # none: a silent brush
+            noises[len(v.layers) + i] = _blend(brush, basis, rate, t)
     parts: dict[int, Part] = {}
-    for j, (layer, table) in enumerate(zip(v.layers, tabs, strict=True)):
-        if table is None:  # a silent layer
-            continue
-        n, dn = noise.interpolate(table, rate, t)
-        e, de = layer.amp(t), layer.amp.derivative(t)
-        q = 1.0 - layer.rattle * eb * gate
-        dq = -layer.rattle * (deb * gate + eb * dgate)
-        c, dc = layer.gain * e * n, layer.gain * (de * n + e * dn)
-        x += q * c
-        dx += dq * c + q * dc
-        parts[j] = Part(c, dc, q, dq, n, dn)
+    for j, (n, dn) in noises.items():
+        c = v.carriers[j]
+        e, de = c.amp(t), c.amp.derivative(t)
+        q = 1.0 - c.rattle * eb * gate
+        dq = -c.rattle * (deb * gate + eb * dgate)
+        cj, dcj = c.gain * e * n, c.gain * (de * n + e * dn)
+        x += q * cj
+        dx += dq * cj + q * dcj
+        parts[j] = Part(cj, dcj, q, dq, n, dn)
     for ring in v.rings:
         if ring.gain:
             e, de = ring.env(t), ring.env.derivative(t)
@@ -426,6 +525,24 @@ def state(v: Voice, times: ArrayLike, rate: int, tabs: Tables) -> State:
             x += ring.gain * e * sn
             dx += ring.gain * (de * sn + e * cs * w)
     return State(phi1, dphi1, gate, dgate, eb, deb, x, dx, parts)
+
+
+def _du(brush: Brush, t: Floats) -> Floats:
+    """Return u′ = 3 s′ / (s ln 2)."""
+    out: Floats = STEPS * brush.sweep.derivative(t) / (brush.sweep(t) * math.log(2))
+    return out
+
+
+def _blend(brush: Brush, basis: Sequence[Floats], rate: int, t: Floats) -> tuple[Floats, Floats]:
+    """Return a brush's blended noise Σ B(u − k) n_k and its derivative at arbitrary times."""
+    u, du = brush.u(t), _du(brush, t)
+    n, dn = np.zeros_like(t), np.zeros_like(t)
+    for k, table in enumerate(basis, brush.first):
+        w, dw, _ = bspline(u - k)
+        nk, dnk = noise.interpolate(table, rate, t)
+        n += w * nk
+        dn += dw * du * nk + w * dnk
+    return n, dn
 
 
 @dataclass(frozen=True)
@@ -461,7 +578,7 @@ def kink_terms(v: Voice, rate: int, tabs: Tables | None = None) -> Kinks:
     if tabs is None:
         tabs = tables(v, rate)
     rows = [*_mode_rows(v, rate, tabs), *_rattle_rows(v, rate, tabs), *_pitch_rows(v, rate, tabs)]
-    rows += [*_layer_rows(v, rate, tabs), *_ring_rows(v, rate, tabs)]
+    rows += [*_layer_rows(v, rate, tabs), *_ring_rows(v, rate, tabs), *_sweep_rows(v, rate, tabs)]
     if not rows:
         empty = np.zeros(0)
         return Kinks((), empty, empty, empty, empty, empty)
@@ -503,7 +620,7 @@ def _rattle_rows(v: Voice, rate: int, tabs: Tables) -> list[Row]:
     s = state(v, v.body_amp.t, rate, tabs)
     j2, j3 = v.body_amp.jumps()
     for j, part in s.parts.items():
-        rattle = v.layers[j].rattle
+        rattle = v.carriers[j].rattle
         if rattle:
             q2 = -rattle * j2 * s.gate
             q3 = -rattle * (j3 * s.gate + 3 * j2 * s.dgate)
@@ -523,7 +640,7 @@ def _pitch_rows(v: Voice, rate: int, tabs: Tables) -> list[Row]:
         if m.gain:
             d3 = d3 + m.gain * m.env(v.pitch.t) * np.cos(m.ratio * s.phi1) * m.ratio * dphi3
     for j, part in s.parts.items():
-        rattle = v.layers[j].rattle
+        rattle = v.carriers[j].rattle
         if rattle:
             # (1 − cos φ_1)/2 has a third derivative that jumps by sin φ_1 · Δφ_1‴ / 2.
             d3 = d3 - rattle * s.eb * 0.5 * np.sin(s.phi1) * dphi3 * part.c
@@ -531,25 +648,109 @@ def _pitch_rows(v: Voice, rate: int, tabs: Tables) -> list[Row]:
     return [Row(paths, v.pitch.t, s, np.zeros_like(d3), d3)]
 
 
+def _carrier_path(v: Voice, j: int) -> str:
+    """Return a carrier's path: noise[j], or brush[i] after the layers."""
+    return f"noise[{j + 1}]" if j < len(v.layers) else f"brush[{j - len(v.layers) + 1}]"
+
+
 def _layer_rows(v: Voice, rate: int, tabs: Tables) -> list[Row]:
-    """Return the layer shapes' jumps."""
+    """Return the jumps of the layers' and the brushes' shapes."""
     rows = []
-    for j, (layer, table) in enumerate(zip(v.layers, tabs, strict=True)):
-        if table is None:  # a silent layer
+    for j, c in enumerate(v.carriers):
+        if not c.gain:  # a silent layer or brush
             continue
-        s = state(v, layer.amp.t, rate, tabs)
-        j2, j3 = layer.amp.jumps()
+        s = state(v, c.amp.t, rate, tabs)
+        j2, j3 = c.amp.jumps()
         q, dq, n, dn = s.parts[j].q, s.parts[j].dq, s.parts[j].n, s.parts[j].dn
         rows.append(
             Row(
-                [f"noise[{j + 1}].amp[{k}]" for k in range(1, layer.amp.t.size + 1)],
-                layer.amp.t,
+                [f"{_carrier_path(v, j)}.amp[{k}]" for k in range(1, c.amp.t.size + 1)],
+                c.amp.t,
                 s,
-                layer.gain * j2 * q * n,
-                layer.gain * (j3 * q * n + 3 * j2 * (dq * n + q * dn)),
+                c.gain * j2 * q * n,
+                c.gain * (j3 * q * n + 3 * j2 * (dq * n + q * dn)),
             ),
         )
     return rows
+
+
+def crossings(brush: Brush) -> tuple[Floats, Floats, NDArray[np.intp]]:
+    """Return where u crosses a whole number: the times, the numbers and each one's sweep segment.
+
+    There B‴ jumps, and with it the blend's third derivative. Each segment of
+    the sweep is monotone, so it crosses each number between its ends once.
+    """
+    times: list[float] = []
+    levels: list[int] = []
+    segments: list[int] = []
+    t, r = brush.sweep.t, brush.sweep.v
+    for i in range(t.size - 1):
+        ra, rb = float(r[i]), float(r[i + 1])
+        if ra == rb:
+            continue
+        # Candidates from u at the ends, one wider either way for rounding; the levels decide, as ratios.
+        lowest, highest = math.floor(STEPS * math.log2(min(ra, rb))) - 1, math.ceil(STEPS * math.log2(max(ra, rb))) + 1
+        ms = range(lowest, highest + 1) if rb > ra else range(highest, lowest - 1, -1)  # in the order u meets them
+        for m in ms:
+            level = 2.0 ** (m / STEPS)
+            if not min(ra, rb) <= level <= max(ra, rb):
+                continue
+            if level == ra:
+                tau = float(t[i])
+            elif level == rb:
+                tau = float(t[i + 1])
+            else:
+                tau = brentq(lambda x, lv=level: float(brush.sweep(x)) - lv, t[i], t[i + 1], xtol=1e-15)
+            if not times or (tau, m) != (times[-1], levels[-1]):  # a crossing at a knot, once
+                times.append(tau)
+                levels.append(m)
+                segments.append(i)
+    return np.array(times, dtype=float), np.array(levels, dtype=float), np.array(segments, dtype=np.intp)
+
+
+def _sweep_rows(v: Voice, rate: int, tabs: Tables) -> list[Row]:
+    """Return the jumps a brush's sweep makes: at its knots, through u″ and u‴, and where u crosses a whole number."""
+    rows = []
+    for i, (brush, basis) in enumerate(zip(v.brushes, brush_tables(v, tabs), strict=True)):
+        if not basis:  # a silent brush
+            continue
+        j, path = len(v.layers) + i, f"brush[{i + 1}].sweep"
+        sweep = brush.sweep
+        # At the knots: u″ and u‴ jump with s″ and s‴, while s and s′ are continuous.
+        t = sweep.t
+        s = state(v, t, rate, tabs)
+        r, dr = sweep(t), sweep.derivative(t)
+        j2, j3 = sweep.jumps()
+        c0 = STEPS / math.log(2)
+        du, du2, du3 = c0 * dr / r, c0 * j2 / r, c0 * (j3 / r - 3 * dr * j2 / r**2)
+        carrier, dcarrier = _brush_carrier(brush, s.parts[j], t)
+        u = brush.u(t)
+        d2, d3 = np.zeros_like(t), np.zeros_like(t)
+        for k, table in enumerate(basis, brush.first):
+            _, b1, b2 = bspline(u - k)
+            nk, dnk = noise.interpolate(table, rate, t)
+            w2, w3 = b1 * du2, b1 * du3 + 3 * b2 * du * du2
+            d2 += carrier * w2 * nk
+            d3 += w3 * carrier * nk + 3 * w2 * (dcarrier * nk + carrier * dnk)
+        rows.append(Row([f"{path}[{k}]" for k in range(1, t.size + 1)], t, s, d2, d3))
+        # Where u crosses a whole number m: B‴(u − k) jumps for k = m − 2 … m + 2, by u′³ each.
+        tau, levels, segments = crossings(brush)
+        if tau.size:
+            s = state(v, tau, rate, tabs)
+            carrier, _ = _brush_carrier(brush, s.parts[j], tau)
+            cube = _du(brush, tau) ** 3
+            d3 = np.zeros_like(tau)
+            for k, table in enumerate(basis, brush.first):
+                jump = np.array([B3_JUMPS.get(int(m) - k, 0.0) for m in levels])
+                d3 += carrier * jump * cube * noise.interpolate(table, rate, tau)[0]
+            rows.append(Row([f"{path}[{g + 1}]" for g in segments], tau, s, np.zeros_like(tau), d3))
+    return rows
+
+
+def _brush_carrier(brush: Brush, part: Part, t: Floats) -> tuple[Floats, Floats]:
+    """Return g e q and its derivative: all of a brush but its blend."""
+    e, de = brush.amp(t), brush.amp.derivative(t)
+    return brush.gain * e * part.q, brush.gain * (de * part.q + e * part.dq)
 
 
 def _ring_rows(v: Voice, rate: int, tabs: Tables) -> list[Row]:

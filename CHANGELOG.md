@@ -22,6 +22,9 @@ The first public release.
 - Up to two rims, struck with the head or instead of it, for rimshots and
   cross-sticks: each a set of up to eight modes at their own frequencies in
   Hz, untouched by the tuning and the glide, with its own damping and shape.
+- A brush: a noise layer whose band moves during the hit by a sweep of up to
+  an octave, as one noise filtered rather than a crossfade, coherent with the
+  layers and gated by the rattle like them.
 - The validated domain: every render reports whether it lies where its
   aliasing is demonstrated below −100 dB, from a rule refit on an adversarial
   grid of 957 fixtures, with the cause of any predicted aliasing and the
