@@ -26,7 +26,8 @@ from .conftest import edit as set_path
 type Floats = NDArray[np.float64]
 
 RATE = 48000
-SNARES = ("tone", "crack", "fat", "driven")
+SNARES = ("tone", "crack", "fat", "driven", "machine", "house", "long-snare", "rimshot")
+CLAPS = ("clap", "short-clap", "big-clap")
 EDITS = 3  # a task takes at most this many field edits
 CENTS = 5  # the measured tuning is right within this
 PING_CENTS = 10  # and the snap's ping, a shorter sound, within this
@@ -227,23 +228,26 @@ def energy_time_ms(x: Floats) -> float:
     return 1000 * float(np.sum(t * x**2) / np.sum(x**2))
 
 
-def test_tighten_the_clap() -> None:
+@pytest.mark.parametrize("name", CLAPS)
+def test_tighten_the_clap(name: str) -> None:
     """Tighten the clap with one command: the bursts and the tail close up, the energy earlier."""
-    p = ref("clap")
+    p = ref(name)
     tighter = patch.stretch(p, "all", 0.7, after_ms=0.0)  # one command: the bursts and the tail close up together
     assert energy_time_ms(audio(tighter)) < 0.85 * energy_time_ms(audio(p))
 
 
-def test_shorten_the_clap_tail() -> None:
+@pytest.mark.parametrize("name", CLAPS)
+def test_shorten_the_clap_tail(name: str) -> None:
     """Shorten the clap's tail with one command."""
-    p = ref("clap")
+    p = ref(name)
     shorter = patch.stretch(p, "all", 0.6)  # one command
     assert decay_ms(audio(shorter)) < 0.8 * decay_ms(audio(p))
 
 
-def test_darken_the_clap() -> None:
+@pytest.mark.parametrize("name", CLAPS)
+def test_darken_the_clap(name: str) -> None:
     """Darken the clap with a field per layer."""
-    p = ref("clap")
+    p = ref(name)
     darker = edit(
         p,
         **{
@@ -254,9 +258,10 @@ def test_darken_the_clap() -> None:
     assert centroid(audio(darker)) < 0.85 * centroid(audio(p))
 
 
-def test_add_aggression_to_the_clap() -> None:
+@pytest.mark.parametrize("name", CLAPS)
+def test_add_aggression_to_the_clap(name: str) -> None:
     """Add aggression to the clap with two fields: a lower crest factor."""
-    p = ref("clap")
+    p = ref(name)
     rougher = edit(p, **{"drive.db": p.drive.db + 8, "output.db": p.output.db - 5})
     assert crest_db(audio(rougher), 40) < crest_db(audio(p), 40) - DENSER_DB
 
@@ -291,3 +296,61 @@ def test_move_the_ping() -> None:
     moved = edit(p, **{"body.tune_hz": round(p.body.tune_hz * 2 ** (-3 / 12), 3)})  # one field: three semitones down
     before, after = body_hz(audio(p), p), body_hz(audio(moved), moved)
     assert 1200 * math.log2(after / before) == pytest.approx(-300, abs=PING_CENTS)
+
+
+# From the played end and the rim click.
+
+
+def test_ring_the_rimshot_more() -> None:
+    """Make the rimshot's hoop ring more with one field: more of its band after the onset."""
+    p = ref("rimshot")
+    ringing = edit(p, **{"rim[1].level_db": p.rim[0].level_db + 6})  # one field
+    assert band_energy(audio(ringing), 1000, 8000, 3, 40) > LOUDER * band_energy(audio(p), 1000, 8000, 3, 40)
+
+
+def test_shorten_the_knock() -> None:
+    """Shorten the cross-stick and the rim click with one command."""
+    for name in ("cross-stick", "rim-click"):
+        p = ref(name)
+        assert decay_ms(audio(patch.stretch(p, "all", 0.6))) < 0.8 * decay_ms(audio(p))
+
+
+def test_make_the_cross_stick_woodier() -> None:
+    """Make the cross-stick woodier with one field: the rim's damping up, its upper modes gone sooner."""
+    p = ref("cross-stick")
+    woodier = edit(p, **{"rim[1].damping": p.rim[0].damping + 1})  # one field
+    assert centroid(audio(woodier), 5, 40) < 0.9 * centroid(audio(p), 5, 40)
+
+
+def test_move_the_click() -> None:
+    """Move the rim click three semitones down with its two modes' fields."""
+    p = ref("rim-click")
+    down = 2 ** (-3 / 12)
+    moved = edit(p, **{f"rim[1].modes[{i}].hz": round(hz * down, 3) for i, (hz, _) in enumerate(p.rim[0].modes, 1)})
+
+    def loudest_hz(x: Floats) -> float:
+        f, power = spectrum(faded(x, 1, 30))
+        return float(f[np.argmax(power)])
+
+    assert 1200 * math.log2(loudest_hz(audio(moved)) / loudest_hz(audio(p))) == pytest.approx(-300, abs=PING_CENTS)
+
+
+def test_widen_the_sweep() -> None:
+    """Widen the brush's sweep with one field: its band higher at the top of the sweep."""
+    p = ref("brush")
+    (top_ms, top), *_ = sorted(p.brush[0].sweep, key=lambda k: -k[1])
+    k = 1 + p.brush[0].sweep.index((top_ms, top))
+    wider = edit(p, **{f"brush[1].sweep[{k}].ratio": 2 * min(r for _, r in p.brush[0].sweep)})  # one field: an octave
+    assert centroid(audio(wider), top_ms - 20, 40) > 1.1 * centroid(audio(p), top_ms - 20, 40)
+
+
+def test_slow_the_sweep() -> None:
+    """Slow the brush's sweep with one command: its brightest moment later."""
+    p = ref("brush")
+    slower = patch.stretch(p, "brush[1].sweep", 1.5)  # one command
+
+    def brightest_ms(x: Floats) -> float:
+        starts = np.arange(0, 300, 10.0)
+        return float(starts[np.argmax([centroid(x, s, 40) for s in starts])])
+
+    assert brightest_ms(audio(slower)) > brightest_ms(audio(p)) + 30

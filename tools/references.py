@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Vittorio Candolo
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""The six references by measurement (plan §3, §8.4): seeds 1–16 at a candidate K.
+"""The references by measurement (plan §3, §8.4): seeds 1–16 at a candidate K.
 
 For each reference it reports the loudness and sample peak of every take,
 whether each take is inside the validated domain and its drive headroom, and
@@ -93,12 +93,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     results = [measure(name, args.k, args.seeds) for name in REFERENCES]
     say(f"K = {args.k}, seeds 1–{args.seeds}")
     say(
-        f"{'reference':<9s} {'LUFS':>6s} {'spread 1–8':>10s} {'max peak':>9s} {'inside':>7s} "
+        f"{'reference':<11s} {'LUFS':>6s} {'spread 1–8':>10s} {'max peak':>9s} {'inside':>7s} "
         f"{'min margin':>11s} {'min headroom':>13s}",
     )
     for r in results:
         say(
-            f"{r['name']:<9s} {r['lufs']:6.1f} {r['spread']:8.2f}dB {r['peak']:7.2f}dB {r['inside']!s:>7s} "
+            f"{r['name']:<11s} {r['lufs']:6.1f} {r['spread']:8.2f}dB {r['peak']:7.2f}dB {r['inside']!s:>7s} "
             f"{r['margin']:9.1f}dB {r['headroom']:11.1f}dB",
         )
     lufs = [r["lufs"] for r in results]

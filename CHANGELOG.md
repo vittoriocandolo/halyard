@@ -27,14 +27,16 @@ The first public release.
   layers and gated by the rattle like them.
 - The validated domain: every render reports whether it lies where its
   aliasing is demonstrated below −100 dB, from a rule refit on an adversarial
-  grid of 957 fixtures, with the cause of any predicted aliasing and the
+  grid of 1,417 fixtures, with the cause of any predicted aliasing and the
   drive headroom left before the status changes. `halyard verify` checks a
   render against a reference rendered at 128 times the base rate, itself
   checked against one at 256.
 - Frozen minimum-phase decimators for the 44.1 and 48 kHz families, verified
   by checksum.
-- Six references to start from: `tone`, `crack`, `fat`, `driven`, `clap` and
-  `snap`, matched in loudness.
+- Fifteen references to start from, matched in loudness: `tone`, `crack`,
+  `fat`, `driven`, `clap` and `snap`; for house, tech house and trance,
+  `machine`, `house`, `short-clap`, `rim-click`, `big-clap` and `long-snare`;
+  and at the played end, `rimshot`, `cross-stick` and `brush`.
 - Patches in TOML, read as UTF-8 or UTF-16, with every field required, every
   problem reported with its field path, and a canonical form.
 - Editing commands that print a complete patch: `tune` to a note or a

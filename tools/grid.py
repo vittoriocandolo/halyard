@@ -110,6 +110,8 @@ BANDS = {
 }
 HIGHEST_HZ = 20000  # the highest a body frequency may go
 RANDOM = 220  # random fixtures
+RANDOM_STRUCK = 80  # and more with rims and a brush, drawn from their own stream so the first 220 stay
+BRUSHED = 0.8  # of those, the share with a brush
 DEEP_EVERY = 10  # every tenth fixture is checked at 512 × base too
 REPORT_EVERY = 25  # fixtures between progress lines
 CONVERGED_DB = -120.0  # two references agree this well, 20 dB below the criterion
@@ -170,7 +172,7 @@ def fixtures() -> list[Fixture]:
         if valid(edits):
             out.append((family, name, edits))
 
-    for family in (_body, _noise, _layers, _rattle, _clicks, _bursts, _snaps, _dynamics):
+    for family in (_body, _noise, _layers, _rattle, _clicks, _bursts, _snaps, _rims, _brushes, _dynamics):
         family(add)
     _seeds(add, out)
     _rates(add)
@@ -385,6 +387,84 @@ def _snaps(add: Add) -> None:
                 )
 
 
+RIM_SETS = {
+    "low": ((100, 0),),
+    "hoop": ((1240, -4), (2930, 0), (5170, -6), (7620, -12)),
+    "top": ((19000, 0), (20000, -3)),
+    "eight": tuple((1000.0 + 2400.0 * i, -3.0 * (i % 3)) for i in range(8)),
+}
+
+
+def rim(level: float, damping: float, hz: tuple[tuple[float, float], ...], shape: list[dict[str, float]]) -> Edits:
+    """Write a rim as TOML parses it."""
+    return {"level_db": level, "damping": damping, "modes": [{"hz": f, "level_db": v} for f, v in hz], "amp": shape}
+
+
+def _rims(add: Add) -> None:
+    """Add modes × rise × damping × level × drive, the rim alone, and over the body and wires."""
+    for sname, hz in RIM_SETS.items():
+        for rise in (0.01, 0.05, 1.0):
+            shape = amp((0, 0), (rise, 1), (rise + 5, 0.35), (30, 0.08), (70, 0))
+            for damping in (0.0, 3.0):
+                for level in (0, 12):
+                    for drive in (0, 12, 24, 36):
+                        add(
+                            "rims",
+                            f"{sname}-r{rise * 1000:g}us-b{damping:g}-L{level}-d{drive}",
+                            **{
+                                "body.level_db": -INF,
+                                "noise[1].level_db": -INF,
+                                "noise[2].level_db": -INF,
+                                "rim": [rim(float(level), damping, hz, shape)],
+                                "drive.db": float(drive),
+                            },
+                        )
+    for drive in DRIVES5:
+        hoop = rim(0.0, 1.0, RIM_SETS["hoop"], amp((0, 0), (0.05, 1), (6, 0.35), (30, 0.08), (70, 0)))
+        click = rim(-6.0, 0.6, ((455, -5), (1667, 0)), amp((0, 0), (0.08, 1), (5, 0.45), (18, 0.15), (45, 0)))
+        add("rims", f"rimshot-two-d{drive}", **{"rim": [hoop, click], "drive.db": float(drive)})
+
+
+def brush(
+    level: float,
+    band: tuple[float, float],
+    sweep: list[dict[str, float]],
+    shape: list[dict[str, float]],
+) -> Edits:
+    """Write a brush as TOML parses it, rattling half deep."""
+    return {"level_db": level, "band_hz": list(map(float, band)), "rattle": 0.5, "sweep": sweep, "amp": shape}
+
+
+SWEEPS = {
+    "slow": pitch((0, 0.8), (140, 1.25), (300, 0.9)),
+    "fast": pitch((0, 1.0), (0.5, 2.0), (1.5, 1.0)),
+    "zigzag": pitch(*((5.0 * i, (0.6, 1.2)[i % 2]) for i in range(32))),
+}
+
+
+def _brushes(add: Add) -> None:
+    """Add bands × sweep × rise × level × drive, the brush alone, and over the body's rattle."""
+    for bname in ("wires", "stick", "clap", "narrowest"):
+        lo, hi = BANDS[bname]
+        for sname, sweep in SWEEPS.items():
+            reach = max(r for r in (k["ratio"] for k in sweep))
+            band = (lo, min(hi, HIGHEST_HZ / reach))
+            for rise in (0.02, 20.0):
+                shape = amp((0, 0), (rise, 1), (rise + 100, 0.5), (240, 0.1), (400, 0))
+                for level in (0, 12):
+                    for drive in (0, 12, 24):
+                        add(
+                            "brushes",
+                            f"{bname}-{sname}-r{rise * 1000:g}us-L{level}-d{drive}",
+                            **{
+                                "noise[1].level_db": -INF,
+                                "noise[2].level_db": -INF,
+                                "brush": [brush(float(level), band, sweep, shape)],
+                                "drive.db": float(drive),
+                            },
+                        )
+
+
 def _dynamics(add: Add) -> None:
     """Add `softer` ladders from every reference, at unity output gain."""
     for name in cli.REFERENCES:
@@ -392,7 +472,8 @@ def _dynamics(add: Add) -> None:
         for db in (0, 6, 12, 18, 24, 30, 36):
             d = patch.to_dict(patch.softer(ref, db))
             d["output"]["db"] = 0.0
-            add("dynamics", f"{name}-softer{db}", **{k: d[k] for k in ("seed", "body", "noise", "drive", "output")})
+            parts = ("seed", "body", "noise", "rim", "brush", "drive", "output")
+            add("dynamics", f"{name}-softer{db}", **{k: d[k] for k in parts if k in d})
 
 
 def _seeds(add: Add, out: list[Fixture]) -> None:
@@ -430,6 +511,12 @@ def _random(out: list[Fixture]) -> None:
     made = 0
     while made < RANDOM:
         e = random_edits(rng)
+        if valid(e):
+            out.append(("random", f"r{made:03d}", e))
+            made += 1
+    struck = np.random.default_rng(2027)
+    while made < RANDOM + RANDOM_STRUCK:
+        e = {**random_edits(struck), **random_rims_and_brush(struck)}
         if valid(e):
             out.append(("random", f"r{made:03d}", e))
             made += 1
@@ -499,6 +586,39 @@ def random_edits(rng: np.random.Generator) -> Edits:
     if e["body.level_db"] == -INF and all(n["level_db"] == -INF for n in layers):
         layers[0]["level_db"] = 0.0  # a silent fixture would test nothing; no draw is spent, so the others stay
     return e
+
+
+def random_rims_and_brush(rng: np.random.Generator) -> Edits:
+    """Draw up to two rims and a brush from their whole valid domain, as edits of the base."""
+
+    def shape(span: float) -> list[dict[str, float]]:
+        rise = float(10 ** rng.uniform(-2, 1))
+        return amp((0, 0), (rise, 1), (rise + 0.3 * span, float(rng.uniform(0.1, 0.8))), (rise + span, 0))
+
+    rims = []
+    for _ in range(int(rng.integers(0, 3))):
+        count = int(rng.integers(1, 9))
+        hz = sorted(float(x) for x in 10 ** rng.uniform(2, math.log10(20000), count))
+        levels = [float(x) for x in rng.uniform(-40, 0, count)]
+        levels[int(rng.integers(count))] = 0.0
+        spread = hz[-1] / hz[0]
+        damping = 3.0 if spread == 1 else min(3.0, math.log(patch.MAX_COMPRESSION) / math.log(spread))
+        rims.append(
+            rim(
+                float(rng.uniform(-30, 12)),
+                float(rng.uniform(0, damping)),
+                tuple(zip(hz, levels, strict=True)),
+                shape(float(rng.uniform(5, 300))),
+            ),
+        )
+    low = float(rng.uniform(0.5, 1.0))
+    ratios = [float(x) for x in rng.uniform(low, 2 * low, int(rng.integers(2, 8)))]
+    knots = sorted(float(x) for x in rng.uniform(0, 400, len(ratios)))
+    lo = float(10 ** rng.uniform(math.log10(20 / low), math.log10(9000)))
+    hi = float(min(20000.0 / max(ratios), lo * 10 ** rng.uniform(0.05, 1.5)))
+    sweep = pitch(*zip(knots, ratios, strict=True))
+    found = brush(float(rng.uniform(-30, 12)), (lo, hi), sweep, shape(float(rng.uniform(20, 500))))
+    return {"rim": rims, "brush": [found] if rng.uniform() < BRUSHED else []}
 
 
 FIELDS = [

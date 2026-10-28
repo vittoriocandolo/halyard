@@ -1,6 +1,6 @@
 # Snare/Clap Synth — Design and Implementation Plan
 
-*Revision 4. Follows the Kick Synth (plan revision 2), which was implemented, validated and approved by ear. This is an independent codebase on its own branch: it carries over the kick's designs and findings, not its code.*
+*Revision 5. Follows the Kick Synth (plan revision 2), which was implemented, validated and approved by ear. This is an independent codebase on its own branch: it carries over the kick's designs and findings, not its code.*
 
 The kick's architecture held up in practice. Every synthesis stage is a pure function of time, curves and noise are exact, one saturator feeds one frozen decimator, patches are strict and complete, and the validated domain is measured. This plan keeps all of it and adapts it to an instrument made mostly of noise, for professionals who program snares and claps in a DAW or a sampler.
 
@@ -19,6 +19,19 @@ What makes this a state-of-the-art instrument is not a bigger model:
 - **Built for production.** It delivers velocity layers and round-robin takes that keep their natural levels, as packs a sampler loads directly, in formats that hardware samplers read. You audition in context and against your own samples.
 
 On the goal of never needing another snare or clap sample: no plan can guarantee that. What a plan can do is make the claim testable for a declared family of sounds and show exactly where it fails. That test is the final gate (§8.5).
+
+## Revision 5
+
+The instrument now serves a declared musical aim: producers whose tracks are led by the kick, in house, tech house and trance, along an axis from the programmed end, where a snare is a machine's, to the played end, where it is a drummer's. The machine end and the middle were already in the family; the played end and the genres' particular hits were not.
+
+| Change | Why |
+|---|---|
+| Rims: up to two `[[rim]]` sources, each up to eight modes at their own frequencies in Hz, with a damping and a shape (§2.3) | A hoop and a stick ring with no harmonic relation to the head, so a rimshot or a cross-stick needs modes that the tuning and the glide do not move |
+| A brush: one `[[brush]]`, a noise layer whose band moves by a sweep of up to an octave (§2.4) | Brushes sweep across the head. One noise blended by a cubic B-spline across third-octave copies keeps the written band's shape within 0.5 dB and its level within 0.1 dB all along the sweep, measured on random bands; the blend is C², so the kink bound gains the sweep's knots and the crossings where B‴ steps |
+| `flam`: a softer grace note before the main stroke, as ordinary knots (§4) | A flam is played, and producers program it; like `bursts`, it adds no parameter |
+| Nine more references, fifteen in all (§1, §8.4) | The genres' hits and the played end: `machine`, `house`, `short-clap`, `rim-click`, `big-clap`, `long-snare`, `rimshot`, `cross-stick` and `brush`, measured like the six |
+
+Both new sources are optional arrays: a patch without them reads and renders as before, so the schema stays 1 for the first release. Acoustic realism stays outside: these are synthesized rimshots, cross-sticks and brushes, not models of a shell, a stick or a room.
 
 ## Revision 4
 
@@ -94,7 +107,7 @@ The instrument has one voice. A modal body and up to four noise layers are summe
 
 It is built for producers and sound designers who program snares and claps in a DAW or a sampler. It renders one-shots, sets of round-robin takes, and velocity-layered packs that a sampler plays.
 
-Its family is synthesized snares and claps: tonal electronic snares, tight bright snares, big modern snares, driven snares, claps, snaps and electronic rim clicks. Six reference patches define acceptance:
+Its family is synthesized snares and claps: tonal electronic snares, tight bright snares, big modern snares, driven snares, claps, snaps and electronic rim clicks, and, at the played end, synthesized rimshots, cross-sticks and brushes. Fifteen reference patches define acceptance:
 
 - **Tone:** two tonal modes and a soft click over bright snappy noise; round and clearly pitched.
 - **Crack:** a quick glide, a sharp click and bright wires with a short decay; tight.
@@ -102,13 +115,22 @@ Its family is synthesized snares and claps: tonal electronic snares, tight brigh
 - **Driven:** body and noise saturated together; dense, still pitched.
 - **Clap:** four bursts and a diffuse tail, with no body.
 - **Snap:** a short, bright burst over a high ping that dies fast; a finger snap or an electronic rim click.
+- **Machine:** two tuned tones and a hiss, no wires and almost no glide; the programmed end.
+- **House:** a punchier drum-machine snare, its tone gliding a little under a bright noise that outlasts it.
+- **Short clap:** three tight bursts and a short tail, dry; tech house.
+- **Rim click:** two short pings and a tick, with no head; the machine's rimshot.
+- **Big clap:** two trains in different bands, staggered, over a long diffuse tail; trance.
+- **Long snare:** a snare whose wires buzz out past half a second, for builds; trance.
+- **Rimshot:** the hoop ringing over a hard hit on the head; the played end.
+- **Cross-stick:** the stick's shoulder knocking the rim, the head barely moving.
+- **Brush:** a swish across the head, the wires answering, under a soft tap.
 
 These are starting patches. Their names never select hidden algorithms.
 
 Five things are outside the model:
 
-- Acoustic snares, whose sound depends on wire physics, shell, stick position and room; also acoustic rimshots, cross-stick and brushes.
-- Performance: rolls and flams. One patch is one hit; dynamics are delivered as velocity layers (§2.7).
+- Acoustic snares, whose sound depends on wire physics, shell, stick position and room; the synthesized rimshots, cross-sticks and brushes of revision 5 do not model them.
+- Performance: rolls. One patch is one hit, or one flam written by `flam`; dynamics are delivered as velocity layers (§2.7).
 - Sounds defined by processing chains: reverb and gated reverb, multi-stage distortion with EQ between stages, layered samples.
 - Stereo width, which belongs to the DAW. Two takes panned apart widen a snare's noise, while its body, identical in every take, stays centred.
 - A real-time plugin. The renderer is a pure function of the patch and takes about a quarter of a second per hit (estimated), so a later frontend could render on every edit and play cached buffers from MIDI. That frontend is not part of this plan.
@@ -175,6 +197,12 @@ Here g_b = 10^(level_db/20), f₀ is `tune_hz`, r(t) is the pitch ratio curve, e
 
 **Tuning.** `tune_hz` is the settled frequency of the first mode. It reaches 4 kHz, so that a snap or a rim click can be a single high ping.
 
+**Rims** (revision 5). A rimshot strikes the hoop with the head; a cross-stick strikes only the hoop, with the stick laid across the head. A hoop and a stick ring with no harmonic relation to the head, so each rim is its own modal source:
+
+$$c_k(t)=g_k\sum_{i=1}^{M_k}a_{ki}\,e_k\big(\tau_{ki}(t)\big)\,\sin 2\pi f_{ki}t,\qquad s_{ki}=(f_{ki}/f_{k1})^{\beta_k}$$
+
+with τ_ki as for the body, from the rim shape's peak. There are up to two rims, each with one to eight modes in Hz from 100 Hz to 20 kHz, strictly increasing, the loudest exactly 0 dB. A rim has no glide and ignores `tune_hz`: the hoop's ring is not the head's. It never gates the rattle. Its shape's knots enter the kink bound exactly as the body's do, with a constant frequency in place of φ₁′. A patch without rims has none, so it renders as before.
+
 ### 2.4 Noise layers
 
 $$w_j(t)=g_j\,e_j(t)\,\Big(1-d_j\,e_b(t)\,\tfrac{1-\cos\phi_1(t)}{2}\Big)\,n_j(t)$$
@@ -188,7 +216,7 @@ $$n_j(t)=\gamma_j\sum_{k=1}^{20000}\lvert H_j(f_k)\rvert\,\rho_k\cos(2\pi f_kt+\
 - editing a band reweights the same components instead of rerolling them;
 - two identical layers at equal level sum to +6 dB, not +3 dB.
 
-**Why layers and not a filter envelope.** A snare's noise darkens as it decays. A time-varying filter has no exact form in this component structure: every sample would need its own 20,000-term sum. Layers keep one exact table each and express the same motion, a bright, short layer over a darker, longer one.
+**Why layers and not a filter envelope.** A snare's noise darkens as it decays. A time-varying filter has no exact form in this component structure: every sample would need its own 20,000-term sum. Layers keep one exact table each and express the same motion, a bright, short layer over a darker, longer one. A band that moves is the brush's, below, and it too is a finite sum of exact tables.
 
 **The click is a layer.** A short, wide layer is the stick; the kick's separate tone-and-noise attack is gone. A tonal ping is a high body mode with strong damping.
 
@@ -211,6 +239,12 @@ $$n_j(t)=\gamma_j\sum_{k=1}^{20000}\lvert H_j(f_k)\rvert\,\rho_k\cos(2\pi f_kt+\
 A ping 12 dB above a snap's burst brought its spread down to 0.8 dB, since the ping is the same in every take. Delivery therefore keeps one gain per set, offers level matching, and reports the spread (§7.1).
 
 **Clap bursts** are ordinary shapes with explicit knots, written by the `bursts` command (§4).
+
+**The brush** (revision 5). Bristles swept across a head make a noise whose band moves. One `[[brush]]` is a layer with a sweep s(t), a ratio that multiplies both band edges:
+
+$$v(t)=g\,e(t)\,q(t)\sum_k B\big(u(t)-k\big)\,n_k(t),\qquad u=3\log_2 s(t)$$
+
+where n_k is the brush's noise in its band moved by k third-octaves, B is the cubic B-spline and q the rattle. Because the n_k are one noise, the sum is that noise weighted by Σ_k B(u − k)|H_k|: a filter, not a crossfade. Measured on 300 random bands, it keeps the written band's shape within 0.5 dB down to 30 dB below its peak, and its level within 0.1 dB, at every position of the sweep. The sweep's ratios lie within 0.5 … 2 and an octave apart at most, so a brush reads at most seven tables. The sweep is a curve held before its first knot and after its last, with zero end slopes, so u is C¹ and the blend C²: the kink bound gains the jumps of u″ and u‴ at the sweep's knots, and of B‴ where u crosses a whole number, by u′³ times B‴'s steps of 1, −4, 6, −4 and 1.
 
 ### 2.5 Drive
 
@@ -419,6 +453,7 @@ Every control has a single role, and the model stays small. Still, a three-mode 
 
   The result is ordinary knots: at most 3N + 2, or 3N + 3 with a start, and the command fails beyond the 32-knot limit. Two layers with different bands and starts make a stacked clap.
 - `halyard softer PATCH DB [--glide P] [--contact P]` prints the same drum struck DB softer (§2.7).
+- `halyard flam PATCH --gap MS [--grace DB] [--glide P] [--contact P]` (revision 5) prints the drum struck twice: a grace note `grace` dB softer by `softer`'s rules, its level written into its shapes so the drive hears it softer, then the main stroke `gap` ms later. Each shape is the grace's until the main stroke starts, takes the grace's value there, and from the main peak on is exactly the main stroke moved by the gap; the pitch curve restarts at the main body's peak. It fails rather than drop knots.
 
 ## 5. Domains
 
@@ -426,7 +461,7 @@ There are three separate promises, as in the kick:
 
 - **Valid domain.** What the parser accepts. The renderer promises defined, finite output with bounded time and memory.
 - **Validated domain.** Where the numerical criteria of §8 are demonstrated.
-- **Voiced regions.** The recorded neighbourhoods of the six references, where musical usefulness is promised.
+- **Voiced regions.** The recorded neighbourhoods of the fifteen references, where musical usefulness is promised.
 
 "Excellent everywhere" is not claimed. The hard limits are:
 
@@ -447,6 +482,8 @@ There are three separate promises, as in the kick:
 | body curves / noise curves | end by 2 s / by 1 s |
 | output | 44.1, 48, 88.2 or 96 kHz; float32, pcm24 or pcm16; gain −60 – +24 dB; peak target −60 – 0 dBFS |
 | `seed` | integer, 0 to 2⁶³ − 1, takes included |
+| rims (revision 5) | 0 – 2, each 1 – 8 modes in 100 Hz – 20 kHz, strictly increasing, the loudest exactly 0 dB; `damping` 0 – 3, with (f_max / f_1)^damping ≤ 512, the body's largest compression; shape by 2 s |
+| brush (revision 5) | 0 – 1; a layer's fields, its shape by 1 s; `sweep` 2 – 32 knots by 1 s, ratios 0.5 – 2 and an octave apart at most, both band edges within 20 Hz – 20 kHz at every knot |
 
 **The validated-domain rule** takes the form measured on the kick, where P is the output peak at unity gain:
 
@@ -457,10 +494,11 @@ $$\text{predicted}=C\,e^{-\pi^2/q_{\mathrm{knee}}}\,P+B_{\mathrm{kink}}\;\le\;10
 
   $$B_{\mathrm{kink}}=\sum_{\text{knots}}\;\sum_{n=2,3}\frac{4\,\zeta(n+1)\,B\,\lvert J_n\rvert}{(2\pi F)^{n+1}},\qquad B=\tfrac{\text{base}}{2}$$
 
-  Each J_n is a jump in the n-th derivative of y at a knot. The bound is computed exactly from each carrier and its slope at every knot, and from the saturator's local slope S′ and curvature S″. Here it is extended in three places:
+  Each J_n is a jump in the n-th derivative of y at a knot. The bound is computed exactly from each carrier and its slope at every knot, and from the saturator's local slope S′ and curvature S″. Here it is extended in four places:
   1. **Body modes.** Each mode's amplitude knots after the peak are mapped by its decay compression, so their jumps scale by s_i² and s_i³. At the peak, where the compression starts, the jump joins the shape's unscaled rise to its compressed decay. At pitch knots, as in the kick, the third derivative jumps; for mode i the jump scales with r_i.
   2. **Rattle.** A layer with rattle also jumps wherever the body shape does, through e_b, and at every pitch knot, through φ₁.
-  3. **Carriers at knots.** Noise values and slopes at knot times come from the exact tables by cubic interpolation. At 1.536 MHz this is accurate to 1.3·10⁻⁷ in value and 1.2·10⁻⁵ in slope, where direct summation at 160 knots took 297 ms (measured). The bound is inflated by 1% to cover the interpolation.
+  3. **Rims and the brush** (revision 5). A rim's modes jump at its shape's knots as the body's do, at a constant frequency. A brush jumps at its shape's knots as a layer does, with its blend for the noise; at its sweep's knots through u″ and u‴; and where u crosses a whole number, through B‴.
+  4. **Carriers at knots.** Noise values and slopes at knot times come from the exact tables by cubic interpolation. At 1.536 MHz this is accurate to 1.3·10⁻⁷ in value and 1.2·10⁻⁵ in slope, where direct summation at 160 knots took 297 ms (measured). The bound is inflated by 1% to cover the interpolation.
 - **C** starts at the kick's frozen value of 2. It is refit on this grid as the smallest value that covers every converged fixture with at least 6 dB of margin.
 - **If the grid finds a mechanism the rule misses**, as the kick's grid found the kinks, the rule gains a term before anything is frozen.
 - **The rule is evaluated per render**, and therefore per take.
@@ -606,6 +644,7 @@ halyard tune snare.toml F3
 halyard stretch snare.toml all 0.8
 halyard bursts clap.toml 'noise[1]' --count 4 --spacing 11
 halyard softer snare.toml 12 > snare-12.toml
+halyard flam snare.toml --gap 25 > flam.toml
 halyard pack snare.toml snare-8.toml snare-16.toml snare-24.toml --takes 6 --out kit/
 ```
 

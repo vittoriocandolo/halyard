@@ -26,7 +26,23 @@ from .render import FORMATS, RenderError, db, export, render_takes
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-REFERENCES = ("tone", "crack", "fat", "driven", "clap", "snap")
+REFERENCES = (
+    "tone",
+    "crack",
+    "fat",
+    "driven",
+    "clap",
+    "snap",
+    "machine",
+    "house",
+    "short-clap",
+    "rim-click",
+    "big-clap",
+    "long-snare",
+    "rimshot",
+    "cross-stick",
+    "brush",
+)
 BEATS_PER_BAR = 4
 
 

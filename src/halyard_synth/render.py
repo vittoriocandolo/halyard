@@ -70,8 +70,9 @@ FAMILY = {44100: 44100, 88200: 44100, 48000: 48000, 96000: 48000}
 # where q is the knee slew and P the output peak. A render is inside when that
 # is at most LIMIT · P, or FLOOR when it is near-silent. SATURATION is refit on
 # the adversarial grid at 32× (docs/grid/k32.csv): 6 dB of margin over every
-# converged fixture needs 0.419, so it is frozen at 0.5 (the kick's grid froze 2).
-SATURATION = 0.5
+# converged fixture needs 0.539, set by a rim's modes at 19–20 kHz under 12 dB of drive, so it is frozen at
+# 0.54 (0.5 before rims; the kick's grid froze 2).
+SATURATION = 0.54
 LIMIT = 1e-5  # −100 dB of the peak
 FLOOR = 1e-7  # the absolute bound for near-silent renders
 QUIET = 1e-2  # below this peak the absolute bound applies

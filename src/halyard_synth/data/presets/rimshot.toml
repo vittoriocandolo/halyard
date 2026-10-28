@@ -1,0 +1,75 @@
+instrument = "snare"
+schema = 1
+seed = 1
+
+[body]
+tune_hz  = 240.0
+level_db = -4.0
+damping  = 1.2              # mode i decays ratio^damping times faster
+modes = [                   # loudest mode exactly 0 dB
+  { ratio = 1.0,   level_db = 0.0 },
+  { ratio = 1.593, level_db = -5.0 },
+  { ratio = 2.136, level_db = -10.0 },
+]
+pitch = [                   # ratio to tune_hz; starts at 0 ms, ends at 1
+  { ms = 0.0, ratio = 1.2 },
+  { ms = 6.0, ratio = 1.0 },
+]
+amp = [                     # shape: 0 at both ends, highest point exactly 1
+  { ms = 0.0,   gain = 0.0 },
+  { ms = 0.25,  gain = 1.0 },
+  { ms = 12.0,  gain = 0.45 },
+  { ms = 50.0,  gain = 0.12 },
+  { ms = 120.0, gain = 0.0 },
+]
+
+[[noise]]                   # noise[1]
+level_db = -8.0
+band_hz  = [1500.0, 18000.0]
+rattle   = 0.0              # 0 … 1, gated at the body's fundamental
+amp = [
+  { ms = 0.0,  gain = 0.0 },
+  { ms = 0.03, gain = 1.0 },
+  { ms = 0.1,  gain = 0.6 },
+  { ms = 1.5,  gain = 0.12 },
+  { ms = 5.0,  gain = 0.0 },
+]
+
+[[noise]]                   # noise[2]
+level_db = -8.0
+band_hz  = [3000.0, 12000.0]
+rattle   = 0.35             # 0 … 1, gated at the body's fundamental
+amp = [
+  { ms = 0.0,   gain = 0.0 },
+  { ms = 0.8,   gain = 1.0 },
+  { ms = 18.0,  gain = 0.45 },
+  { ms = 70.0,  gain = 0.1 },
+  { ms = 150.0, gain = 0.0 },
+]
+
+[[rim]]                     # rim[1]: the hoop's ring and the stick's knock
+level_db = -4.0
+damping  = 1.0              # mode i decays (hz_i / hz_1)^damping times faster
+modes = [                   # loudest mode exactly 0 dB
+  { hz = 1240.0, level_db = -4.0 },
+  { hz = 2930.0, level_db = 0.0 },
+  { hz = 5170.0, level_db = -6.0 },
+  { hz = 7620.0, level_db = -12.0 },
+]
+amp = [
+  { ms = 0.0,  gain = 0.0 },
+  { ms = 0.05, gain = 1.0 },
+  { ms = 6.0,  gain = 0.35 },
+  { ms = 30.0, gain = 0.08 },
+  { ms = 70.0, gain = 0.0 },
+]
+
+[drive]
+db = 3.0                    # small-signal gain; 0 = bypass
+
+[output]
+sample_rate = 48000
+format      = "float32"     # "float32" | "pcm24" | "pcm16"
+mode        = "gain"        # "gain" | "peak" | "true-peak"
+db          = -9.3          # gain in dB, or peak target in dBFS
+polarity    = 1

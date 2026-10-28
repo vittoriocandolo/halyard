@@ -56,6 +56,7 @@ SWEEP = (0.5, 2.0)  # a sweep's ratios, an octave either way
 SWEEP_TRAVEL = 2.0  # and an octave between its lowest and highest
 LOWEST_BAND_HZ = 20.0
 MAX_RIM_MODES = 8
+MAX_COMPRESSION = MAX_RATIO**3  # how much faster any mode may decay than its first: the body's 8 at damping 3
 RIM_HZ = (100.0, 20000.0)  # where a rim's modes may lie
 PAIR = 2  # a knot, a mode and a band are pairs
 LOWEST_HZ, HIGHEST_HZ = 10.0, 20000.0  # where a body frequency may go
@@ -424,20 +425,28 @@ def _validate_rims(rims: tuple[Rim, ...], problems: _Problems) -> None:
     for j, r in enumerate(rims, 1):
         path = f"rim[{j}]"
         problems.number(f"{path}.level_db", r.level_db, -90.0, 24.0, silence=True)
-        problems.number(f"{path}.damping", r.damping, 0.0, 3.0)
-        _validate_rim_modes(r.modes, path, problems)
+        damping = problems.number(f"{path}.damping", r.damping, 0.0, 3.0)
+        if _validate_rim_modes(r.modes, path, problems) and damping is not None:
+            s = (r.modes[-1][0] / r.modes[0][0]) ** damping
+            if s > MAX_COMPRESSION:
+                problems.add(
+                    f"{path}.damping",
+                    f"its highest mode would decay {s:.4g} times faster than its first, more than "
+                    f"{MAX_COMPRESSION:g}; lower the damping or bring the modes closer",
+                )
         problems.shape(f"{path}.amp", r.amp, MAX_BODY_MS)
 
 
-def _validate_rim_modes(modes: object, path: str, problems: _Problems) -> None:
-    """Check a rim's modes: 1 to 8, in Hz from 100 Hz to 20 kHz, increasing, the loudest exactly 0 dB."""
+def _validate_rim_modes(modes: object, path: str, problems: _Problems) -> bool:
+    """Check a rim's modes: 1 to 8, in Hz from 100 Hz to 20 kHz, increasing, the loudest exactly 0 dB; True if so."""
     where = f"{path}.modes"
     if not isinstance(modes, tuple) or not all(isinstance(m, tuple) and len(m) == PAIR for m in modes):
         problems.add(where, "expected (hz, level_db) modes")
-        return
+        return False
     if not 1 <= len(modes) <= MAX_RIM_MODES:
         problems.add(where, f"needs 1 to {MAX_RIM_MODES} modes, found {len(modes)}")
-        return
+        return False
+    before = len(problems)
     found = [problems.number(f"{where}[{i}].hz", hz, RIM_HZ[0], RIM_HZ[1]) for i, (hz, _) in enumerate(modes, 1)]
     given = [problems.number(f"{where}[{i}].level_db", v, -60.0, 0.0) for i, (_, v) in enumerate(modes, 1)]
     for i, (a, b) in enumerate(itertools.pairwise(found), 2):
@@ -446,6 +455,7 @@ def _validate_rim_modes(modes: object, path: str, problems: _Problems) -> None:
     levels = [v for v in given if v is not None]
     if len(levels) == len(given) and max(levels) != 0.0:
         problems.add(where, f"the loudest mode must be exactly 0 dB, found {max(levels)!r}")
+    return len(problems) == before
 
 
 def _validate_drive(d: object, problems: _Problems) -> None:

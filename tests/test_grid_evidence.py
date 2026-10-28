@@ -30,6 +30,8 @@ FAMILIES = {
     "clicks",
     "bursts",
     "snaps",
+    "rims",
+    "brushes",
     "dynamics",
     "seeds",
     "rates",

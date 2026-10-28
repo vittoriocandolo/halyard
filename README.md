@@ -47,7 +47,9 @@ halyard flam snare.toml --gap 25 > flam.toml             # a grace note 12 dB so
 halyard pack snare.toml snare-8.toml snare-16.toml snare-24.toml --takes 6 --out kit/
 ```
 
-The six references are `tone`, `crack`, `fat`, `driven`, `clap` and `snap`.
+The fifteen references are `tone`, `crack`, `fat`, `driven`, `clap` and `snap`,
+the genres' `machine`, `house`, `short-clap`, `rim-click`, `big-clap` and
+`long-snare`, and the played end's `rimshot`, `cross-stick` and `brush`.
 They are matched in loudness (−27 LUFS), peak below −1 dBFS over seeds 1–16,
 and every take of them is inside the validated domain with at least 16 dB of
 drive headroom. They are starting points: their names never select hidden
@@ -214,11 +216,12 @@ spreads over more than 1 dB. GUIDE.md explains every line.
 ```
 uv run pytest                                    # the full suite (about a minute)
 uv run python -m tools.design_decimator --check
-uv run python -m tools.grid run --k 32           # the adversarial grid (about 3 minutes on 12 cores)
+uv run python -m tools.grid run --k 32 --workers 6  # the adversarial grid, about 10 minutes; a brush's
+                                                    # references hold up to seven tables of 98–197 MB, so 6 fit in 16 GB
 uv run python -m tools.grid analyze docs/grid/k16.csv docs/grid/k32.csv
 uv run python -m tools.headroom run --dense      # the report's drive headroom against full renders (about 20 minutes on 12 cores)
 uv run python -m tools.headroom analyze docs/grid/headroom.csv
-uv run python -m tools.references                # the six references over seeds 1–16
+uv run python -m tools.references                # the fifteen references over seeds 1–16
 uv run python -m tools.bench                     # render time and memory on this machine
 uv run python -m tools.golden                    # regenerate golden renders (a deliberate sound change only)
 ```
@@ -242,14 +245,14 @@ sample-replacement benchmark.
 | `src/halyard_synth/wav.py` | RIFF writing and reading, float and PCM |
 | `src/halyard_synth/audition.py` | hits on the beat grid, patches and takes cycling, beds, A/B and blind order, watching, playback |
 | `src/halyard_synth/cli.py` | commands |
-| `src/halyard_synth/data/` | frozen decimators and checksums, the six references |
+| `src/halyard_synth/data/` | frozen decimators and checksums, the fifteen references |
 
 ## Status
 
 | Milestone | State |
 |---|---|
 | 1. Complete path | Done. Every §8.1 criterion that does not need the grid passes (VALIDATION.md). |
-| 2. Measure and freeze | Done. K = 32, the rule's constant (0.5) and the decimators are frozen from a 957-fixture grid at 16× and 32×; the drive headroom is checked on every fixture; golden renders begin. |
+| 2. Measure and freeze | Done. K = 32, the rule's constant (0.54) and the decimators are frozen from an adversarial grid, now 1,417 fixtures at 32× (K chosen on the first 957 at 16× and 32×); the drive headroom is checked on every fixture; golden renders begin. |
 | 3. Audition and delivery | Done here with a simulated device: exact buffers, stale renders dropped, swaps at hit boundaries, patches and takes cycling, the bed on the grid. Packs parse back from their SFZ with the right velocity and take mapping. Playing through a real device and loading packs in two SFZ players needs you. |
 | 4. Voicing | By measurement: the references are loudness-matched, inside with 16 dB or more of drive headroom for seeds 1–16, and every usability task moves its measurement the right way. Approval by ear, in context and across takes and strengths, needs you. |
 | 5. Benchmark | Protocol written (BENCHMARK.md); it needs your samples and your ears. |

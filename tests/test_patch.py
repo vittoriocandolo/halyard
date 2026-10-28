@@ -126,10 +126,12 @@ def random_patch(rng: np.random.Generator) -> patch.Patch:
         hz = np.sort(rng.choice(np.arange(100, 20001), k, replace=False)).astype(float)
         db = list(rng.uniform(-60, 0, k))
         db[int(rng.integers(k))] = 0.0
+        spread = hz[-1] / hz[0]
+        damping = 3.0 if spread == 1 else min(3.0, math.log(patch.MAX_COMPRESSION) / math.log(spread))
         rims.append(
             patch.Rim(
                 float(rng.choice([-math.inf, rng.uniform(-90, 24)])),
-                float(rng.uniform(0, 3)),
+                float(rng.uniform(0, damping)),
                 tuple(zip(hz.tolist(), db, strict=True)),
                 shape(int(rng.integers(3, 33)), float(rng.uniform(0, 5)), 1990),
             ),
@@ -801,7 +803,7 @@ def test_softer_fails_rather_than_clamping() -> None:
     assert any(m.startswith("noise[1].band_hz[2]") for m in problems(patch.softer, p, -12))
 
 
-@pytest.mark.parametrize("name", ["tone", "crack", "fat", "driven", "clap", "snap"])
+@pytest.mark.parametrize("name", cli.REFERENCES)
 def test_softer_ladders_on_every_reference(name: str) -> None:
     """Make each reference 0 to 36 dB softer, by the plan's rules exactly, to the decimals softer writes."""
     # Plan §8.1: levels fall by exactly DB, the glide's excess scales by v², rises by v^(−1/5) and upper
@@ -1107,7 +1109,7 @@ def shape_curve(knots: patch.Knots) -> Callable[[np.ndarray], np.ndarray]:
     return lambda ms: c(ms / 1000)
 
 
-@pytest.mark.parametrize("name", ["tone", "crack", "fat", "driven", "clap", "snap"])
+@pytest.mark.parametrize("name", cli.REFERENCES)
 def test_a_flam_is_the_grace_then_the_main_stroke(name: str) -> None:
     """Find every shape the softer grace's, then from the main stroke's peak on the main stroke's, moved by the gap."""
     p = loads(cli.reference_text(name))
@@ -1163,3 +1165,12 @@ def test_flam_failures() -> None:
     assert any(m.startswith("noise[2].amp") for m in problems(patch.flam, p, 900.0))  # past the noise's 1 s
     many = patch.bursts(p, "noise[1]", patch.Train(8, 5.0))
     assert any(m.startswith("noise[1].amp: needs 3 to 32 knots") for m in problems(patch.flam, many, GAP_MS))
+
+
+def test_a_rim_decays_no_faster_than_the_body_may(example_dict: dict[str, Any]) -> None:
+    """Refuse a rim whose highest mode would decay more than 512 times faster than its first, as no body mode can."""
+    wide = dict(rim((1000, 0), (8000, -3)), damping=3.0)  # 8³ = 512: the body's most
+    from_dict(dict(example_dict, rim=[wide]))
+    wider = dict(wide, modes=[{"hz": 1000, "level_db": 0}, {"hz": 8100, "level_db": -3}])
+    found = problems(from_dict, dict(example_dict, rim=[wider]))
+    assert found[0].startswith("rim[1].damping: its highest mode would decay 531.4 times faster than its first")

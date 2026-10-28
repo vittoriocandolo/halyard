@@ -32,6 +32,15 @@ patch of any exported file, take included.
 | `driven` | Body and noise saturated together; dense, still pitched | drive, the wires' level |
 | `clap` | Four bursts and a diffuse tail, with no body | `bursts`, the bands, the tail layer |
 | `snap` | A short, bright burst over a high ping that dies fast; a finger snap or rim click | the ping's tuning, the burst's band |
+| `machine` | Two tuned tones and a hiss, no wires and almost no glide; the programmed end | the second mode's ratio and level, the hiss's length |
+| `house` | A punchier drum-machine snare, its tone gliding a little under a bright noise that outlasts it | drive, the glide, the noise's length |
+| `short-clap` | Three tight bursts and a short tail, dry; tech house | `bursts`, the tail layer |
+| `rim-click` | Two short pings and a tick, no head; the machine's rimshot | the rim's two frequencies, `stretch` |
+| `big-clap` | Two trains in different bands, staggered, over a long diffuse tail; trance | the trains' `--start` and bands, the tail |
+| `long-snare` | Wires that buzz out past half a second, for builds; trance | the wires' length and rattle, drive |
+| `rimshot` | The hoop ringing over a hard hit on the head | the rim's level and damping |
+| `cross-stick` | The stick's shoulder knocking the rim, the head barely moving | the rim's damping and frequencies, the body's level |
+| `brush` | A swish across the head, the wires answering, under a soft tap | the sweep's knots, `stretch brush[1].sweep` |
 
 They are matched in loudness (−27 LUFS) so you can compare them fairly, and
 they peak below −1 dBFS. Raise `output.db` as you need.
@@ -103,7 +112,7 @@ head: it ignores `tune_hz` and the glide, and never rattles the wires.
 | Field | Range | What it does |
 |---|---|---|
 | `level_db` | −inf, −90 – +24 | The rim's level. |
-| `damping` | 0 – 3 | Mode i decays (hz_i / hz_1)^damping times faster than the first, from the rim's peak on. |
+| `damping` | 0 – 3 | Mode i decays (hz_i / hz_1)^damping times faster than the first, from the rim's peak on; at most 512 times, as fast as a body mode can, or the patch is refused. |
 | `modes` | 1 – 8 | `{ hz, level_db }`, from 100 Hz to 20 kHz, strictly increasing, the loudest exactly 0 dB. |
 | `amp` | 3 – 32 knots | The rim's shape, within 2 s. |
 
@@ -334,7 +343,8 @@ which some players cap; the pack report says so.
 
 ## Outside the family
 
-Acoustic snares, rimshots, cross-stick and brushes; rolls and flams;
-processing chains such as gated reverb; and stereo width are outside the
-model. Two takes panned apart widen a snare's noise while its body, identical
+Acoustic snares, whose sound depends on wire physics, shell, stick position
+and room; rolls; processing chains such as gated reverb; and stereo width are
+outside the model. The rimshot, the cross-stick and the brush are synthesized:
+they are the played end of the family, not models of a drum. Two takes panned apart widen a snare's noise while its body, identical
 in every take, stays centred.
