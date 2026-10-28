@@ -23,6 +23,7 @@ jobs:
       - run: uv run --locked ruff check
       - run: uv run --locked ruff format --check
       - run: uv run --locked typos
+      - run: uv run --locked python -m docs.build --check
       - run: uv run --locked zizmor --persona auditor .
         env:
           GH_TOKEN: ${{ github.token }}

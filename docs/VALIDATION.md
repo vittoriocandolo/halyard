@@ -244,21 +244,21 @@ reference peaks below −1 dBFS.
 
 | Reference | LUFS | Loudness spread, takes 1–8 | Largest peak, seeds 1–16 | Inside, seeds 1–16 | Smallest margin | Smallest drive headroom |
 |---|---|---|---|---|---|---|
-| tone | −27.0 | 0.15 dB | −8.38 dBFS | yes | 56.4 dB | 28.1 dB |
-| crack | −27.0 | 0.28 dB | −6.72 dBFS | yes | 19.1 dB | 22.8 dB |
-| fat | −27.0 | 0.16 dB | −11.83 dBFS | yes | 33.4 dB | 20.6 dB |
+| tone | −27.0 | 0.15 dB | −8.38 dBFS | yes | 56.4 dB | 28.0 dB |
+| crack | −27.0 | 0.28 dB | −6.72 dBFS | yes | 19.1 dB | 22.7 dB |
+| fat | −27.0 | 0.16 dB | −11.83 dBFS | yes | 33.4 dB | 20.5 dB |
 | driven | −27.0 | 0.15 dB | −13.35 dBFS | yes | 20.8 dB | 16.3 dB |
-| clap | −27.0 | 0.77 dB | −8.63 dBFS | yes | 29.2 dB | 27.4 dB |
+| clap | −27.0 | 0.77 dB | −8.63 dBFS | yes | 29.2 dB | 27.3 dB |
 | snap | −27.0 | 0.64 dB | −1.39 dBFS | yes | 25.3 dB | 27.1 dB |
-| machine | −27.0 | 0.17 dB | −5.36 dBFS | yes | 67.9 dB | 27.8 dB |
-| house | −27.0 | 0.30 dB | −9.87 dBFS | yes | 30.5 dB | 18.7 dB |
+| machine | −27.0 | 0.17 dB | −5.36 dBFS | yes | 67.9 dB | 27.7 dB |
+| house | −27.0 | 0.30 dB | −9.87 dBFS | yes | 30.5 dB | 18.6 dB |
 | short-clap | −27.0 | 0.87 dB | −3.95 dBFS | yes | 36.3 dB | 27.1 dB |
 | rim-click | −27.0 | 0.03 dB | −4.64 dBFS | yes | 23.0 dB | 28.4 dB |
-| big-clap | −27.0 | 0.28 dB | −12.96 dBFS | yes | 31.2 dB | 23.6 dB |
+| big-clap | −27.0 | 0.28 dB | −12.96 dBFS | yes | 31.2 dB | 23.5 dB |
 | long-snare | −27.0 | 0.17 dB | −14.26 dBFS | yes | 31.4 dB | 21.4 dB |
 | rimshot | −27.0 | 0.23 dB | −6.35 dBFS | yes | 19.5 dB | 24.2 dB |
-| cross-stick | −27.0 | 0.03 dB | −6.03 dBFS | yes | 31.8 dB | 29.4 dB |
-| brush | −27.0 | 0.33 dB | −12.75 dBFS | yes | 95.3 dB | 26.6 dB |
+| cross-stick | −27.0 | 0.03 dB | −6.03 dBFS | yes | 31.8 dB | 29.3 dB |
+| brush | −27.0 | 0.33 dB | −12.75 dBFS | yes | 95.3 dB | 26.5 dB |
 
 The loudness range across the references is 0.08 dB. Every take spread is
 within 1 dB, so none needs level matching. The nine references of revision 5

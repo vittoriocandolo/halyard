@@ -1,12 +1,14 @@
 # Halyard
 
-A one-voice snare and clap synthesizer, rendered offline to mono WAV. It
-implements the *Snare/Clap Synth design and implementation plan, revision 4*
-([docs/PLAN.md](docs/PLAN.md)): a modal body and up to four layers of one
-seeded noise are summed into one saturator and band-limited once by a frozen
-minimum-phase decimator.
+A one-voice snare and clap synthesizer, rendered offline to mono WAV, for
+producers who program their drums: house, tech house and trance at its core,
+from a drum machine's snare to a drummer's rimshot, cross-stick and brush. It
+implements the *Snare/Clap Synth design and implementation plan, revision 5*
+([docs/PLAN.md](docs/PLAN.md)): a modal body, up to four layers of one seeded
+noise, up to two rims and a brush are summed into one saturator and
+band-limited once by a frozen minimum-phase decimator.
 
-    x(t) = b(t) + Σ_j w_j(t),    y(t) = S_α(x(t)),    out[m] = p · g · Σ_k h[k] · y((mK − k) / F)
+    x(t) = b(t) + Σ_j w_j(t) + Σ_k c_k(t) + v(t),    y(t) = S_α(x(t)),    out[m] = p · g · Σ_k h[k] · y((mK − k) / F)
 
 Everything before the decimator is a pure function of time, so a render
 depends only on the patch, its seed, the renderer version and the frozen
@@ -15,7 +17,11 @@ filter. Each render states whether its aliasing is demonstrated below
 leave that domain.
 
 The user guide is [docs/GUIDE.md](docs/GUIDE.md): the workflow, every
-control, recipes and how to read the report.
+control, recipes and how to read the report. Hear the fifteen references,
+with their figures, reports and patches, in
+[docs/references.md](docs/references.md).
+
+![The crack reference: its level over time and its spectrum](docs/figures/crack.svg)
 
 ## Install
 
@@ -39,13 +45,17 @@ halyard audition snare.toml --watch --against favourite.wav --blind
 halyard render snare.toml --out snare.wav --takes 8      # round-robin takes snare_rr1.wav … snare_rr8.wav
 halyard verify snare.toml --takes 8                      # each take against its reference render
 halyard extract snare_rr3.wav > take3.toml               # the exact patch of any exported file
-halyard tune snare.toml F3                               # retune: modes, glide and rattle follow
-halyard stretch snare.toml all 0.8                       # fit every shape to a tempo
-halyard bursts clap.toml 'noise[1]' --count 4 --spacing 11   # a clap train as ordinary knots
+halyard tune snare.toml F3 > snare-f3.toml               # retune: modes, glide and rattle follow
+halyard stretch snare.toml all 0.8 > tight.toml          # fit every shape to a tempo
+halyard init clap > clap.toml
+halyard bursts clap.toml 'noise[1]' --count 4 --spacing 11 > clap-4.toml   # a clap train as ordinary knots
 halyard softer snare.toml 12 > snare-12.toml             # the same drum struck 12 dB softer
+halyard softer snare.toml 24 > snare-24.toml
 halyard flam snare.toml --gap 25 > flam.toml             # a grace note 12 dB softer, 25 ms ahead
-halyard pack snare.toml snare-8.toml snare-16.toml snare-24.toml --takes 6 --out kit/
+halyard pack snare.toml snare-12.toml snare-24.toml --takes 6 --out kit/
 ```
+
+A test runs these commands, all but `audition`, in this order.
 
 The fifteen references are `tone`, `crack`, `fat`, `driven`, `clap` and `snap`,
 the genres' `machine`, `house`, `short-clap`, `rim-click`, `big-clap` and
@@ -139,6 +149,12 @@ In brief:
   layers is a spectral morph, and editing a band reweights the same noise
   instead of rerolling it. `rattle` gates a layer at the body's fundamental,
   glide included, as snare wires slap the head.
+- **Rims.** Up to two `[[rim]]` tables, or none: the hoop's ring and the
+  stick's knock, up to eight modes each at their own frequencies in Hz, which
+  the tuning and the glide leave alone. A rimshot puts one over the head; a
+  cross-stick is a rim almost alone.
+- **Brush.** One `[[brush]]`, or none: a noise layer whose band moves by a
+  sweep of up to an octave, as one noise filtered rather than a crossfade.
 - **Drive.** `drive.db` is the saturator's small-signal gain on the sum; 0 dB
   is exact bypass.
 - **Seed.** Each seed is a take of the same sound. `--takes N` renders seeds
@@ -163,6 +179,8 @@ The valid domain:
 | body curves / noise curves | end by 2 s / by 1 s |
 | output | 44.1, 48, 88.2 or 96 kHz; float32, pcm24 or pcm16; gain −60 – +24 dB; sample or true peak target −60 – 0 dBFS |
 | `seed` | 0 – 2⁶³ − 1, takes included |
+| rims | 0 – 2, each 1 – 8 modes in 100 Hz – 20 kHz, strictly increasing, the loudest exactly 0 dB; `damping` 0 – 3, the highest mode decaying at most 512 times faster than the first; shape by 2 s |
+| brush | 0 – 1; a layer's fields, its shape by 1 s; `sweep` 2 – 32 knots by 1 s, ratios 0.5 – 2 and an octave apart at most, both band edges within 20 Hz – 20 kHz |
 
 ## What a render reports
 
@@ -172,7 +190,7 @@ length   260.0 ms source, 261.9 ms exported (12571 samples at 48000 Hz, float32)
 peak     -4.05 dBFS sample, -3.72 dBTP true
 loudness -19.0 LUFS, the largest 400 ms momentary loudness (BS.1770)
 domain   inside the validated domain: predicted aliasing -137 dB, margin 37.0 dB
-         mostly kinks, 64% at noise[1].amp[2] (0.05 ms); drive headroom +21.6 dB
+         mostly kinks, 64% at noise[1].amp[2] (0.05 ms); drive headroom +21.5 dB
 render   86 ms
 ```
 
@@ -224,6 +242,8 @@ uv run python -m tools.headroom analyze docs/grid/headroom.csv
 uv run python -m tools.references                # the fifteen references over seeds 1–16
 uv run python -m tools.bench                     # render time and memory on this machine
 uv run python -m tools.golden                    # regenerate golden renders (a deliberate sound change only)
+uv run python -m docs.build                      # the figures, sounds and gallery in docs/, from the code
+uv run python -m docs.build --check              # what is out of date (a test checks it too)
 ```
 
 [docs/VALIDATION.md](docs/VALIDATION.md) records every numerical criterion of
@@ -237,7 +257,7 @@ sample-replacement benchmark.
 | `src/halyard_synth/patch.py` | schema, parsing, validation, canonical TOML; `tune`, `stretch`, `bursts`, `softer`, `flam`; tuning helpers |
 | `src/halyard_synth/curve.py` | Hermite curves, PCHIP slopes, exact integrals, knot jumps, decay compression |
 | `src/halyard_synth/noise.py` | seeded noise, coherent layer tables (cached), values and slopes between samples, seeded dither |
-| `src/halyard_synth/voice.py` | modal body, noise layers with rattle, drive; knee slew at every drive, kink bound |
+| `src/halyard_synth/voice.py` | modal body, noise layers with rattle, rims, the brush's blend, drive; knee slew at every drive, kink bound |
 | `src/halyard_synth/render.py` | rates, frozen decimators, parallel decimation, domain rule and drive headroom, takes, report, export |
 | `src/halyard_synth/loudness.py` | BS.1770 K-weighting at every rate, momentary loudness |
 | `src/halyard_synth/pack.py` | velocity layers, takes, one gain per pack, the SFZ mapping |

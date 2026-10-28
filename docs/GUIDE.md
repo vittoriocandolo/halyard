@@ -43,7 +43,8 @@ patch of any exported file, take included.
 | `brush` | A swish across the head, the wires answering, under a soft tap | the sweep's knots, `stretch brush[1].sweep` |
 
 They are matched in loudness (−27 LUFS) so you can compare them fairly, and
-they peak below −1 dBFS. Raise `output.db` as you need.
+they peak below −1 dBFS. Raise `output.db` as you need. Hear each one, with
+its figure, its report and its patch, in [the gallery](references.md).
 
 ## Every control
 
@@ -144,6 +145,8 @@ is a short layer, needing no sweep. `halyard stretch` names the sweep
 `brush[1].sweep` and stretches it from 0 ms; `halyard softer` treats the brush
 as a layer and leaves its sweep alone.
 
+![The brush reference's spectral centroid follows its sweep, and stays put with the sweep held](figures/sweep.svg)
+
 ### Drive
 
 `drive.db`, 0 – 48 dB, is the small-signal gain of a tanh saturator on the sum
@@ -214,6 +217,8 @@ fail, and say why, rather than clamp.
   At 12 dB softer, a 1.08 glide becomes 1.005, a 0.05 ms rise 0.066 ms and a
   16 kHz edge 12.1 kHz. An exponent of 0 turns its rule off. `softer` by a then
   b equals `softer` by a + b up to the decimals it writes.
+
+  ![The crack reference struck 12 and 24 dB softer: quieter, its rise slower and its top darker](figures/softer.svg)
 - **`halyard flam PATCH --gap MS [--grace DB] [--glide P] [--contact P]`**
   strikes the drum twice: a grace note `--grace` dB softer (default 12), by
   `softer`'s rules, then the main stroke `--gap` ms later. Every shape is the
@@ -223,6 +228,8 @@ fail, and say why, rather than clamp.
   higher modes decay with its fundamental. A flam of 15–40 ms suits most
   tempos; it fails rather than drop knots when a shape would need more than
   32 or run past its limit.
+
+  ![The tone reference as a flam: a grace note 12 dB softer, then the main stroke 25 ms later](figures/flam.svg)
 
 ## Recipes
 
@@ -256,7 +263,7 @@ length   260.0 ms source, 261.9 ms exported (12571 samples at 48000 Hz, float32)
 peak     -4.05 dBFS sample, -3.72 dBTP true
 loudness -19.0 LUFS, the largest 400 ms momentary loudness (BS.1770)
 domain   inside the validated domain: predicted aliasing -137 dB, margin 37.0 dB
-         mostly kinks, 64% at noise[1].amp[2] (0.05 ms); drive headroom +21.6 dB
+         mostly kinks, 64% at noise[1].amp[2] (0.05 ms); drive headroom +21.5 dB
 render   86 ms
 ```
 
@@ -266,7 +273,9 @@ render   86 ms
   shapes: silent sources never lengthen a file) and the exported length, which
   includes the decimator's decaying tail. Every file starts at exactly zero and
   ends in that tail, so a sampler needs no fades.
-- **peak** is the sample peak and a 4× oversampled true-peak estimate.
+- **peak** is the sample peak and the true peak: the crest of the output's
+  band-limited reconstruction, measured exactly, as `output.mode = "true-peak"`
+  targets it.
 - **loudness** is the largest K-weighted 400 ms momentary loudness over every
   window position (ITU-R BS.1770), in LUFS. Short sounds read low, because the
   window spreads their energy over 400 ms.

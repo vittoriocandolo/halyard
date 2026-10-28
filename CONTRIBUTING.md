@@ -68,6 +68,16 @@ supports, and the tests again with the oldest supported NumPy and SciPy.
 - **Every check stays on.** Fix what a linter finds instead of silencing it.
   The one exception is `assert` in tests, which is how pytest checks.
 
+## Documentation
+
+The figures, the sounds and the references' gallery in `docs/` are generated
+from the code: `uv run python -m docs.build` writes them, and a test fails
+when any is out of date, as when a change to the sound or to a reference
+changes what they show. The gallery describes each reference by the user
+guide's table of references, so a new reference needs a row there. The
+README's quick start runs as a test, and its example report must be what the
+code prints.
+
 ## Frozen filters
 
 The decimators ship as data in `src/halyard_synth/data`, checked by SHA-256.
