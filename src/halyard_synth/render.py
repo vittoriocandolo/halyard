@@ -594,6 +594,7 @@ class Report:
     tune_hz: float
     modes_hz: tuple[float, ...]
     body_sounds: bool
+    rims_hz: tuple[tuple[int, tuple[float, ...]], ...]  # each audible rim's number and its modes
     source_ms: float
     samples: int
     sample_rate: int
@@ -683,6 +684,8 @@ class Report:
             tuning += f"; modes {modes} Hz"
         else:
             tuning += " (the body is silent)"
+        for k, hz in self.rims_hz:
+            tuning += f"; rim {k} " + ", ".join(f"{f:.1f}" for f in hz) + " Hz"
         pcm = self.format if FORMATS[self.format] is None else f"{FORMATS[self.format]}-bit PCM"
         first = self.takes[0]
         seeds = f"seed {first.seed}" if len(self.takes) == 1 else f"seeds {first.seed}–{self.takes[-1].seed}"
@@ -793,6 +796,7 @@ def render_takes(p: Patch, takes: int = 1, *, level_match: bool = False) -> tupl
         tune_hz=p.body.tune_hz,
         modes_hz=tuple(p.body.tune_hz * r for r, _ in p.body.modes),
         body_sounds=v.body_sounds,
+        rims_hz=tuple((k, tuple(hz for hz, _ in r.modes)) for k, r in enumerate(p.rim, 1) if r.level_db > -math.inf),
         source_ms=p.length_ms,
         samples=audio[0].size,
         sample_rate=p.output.sample_rate,

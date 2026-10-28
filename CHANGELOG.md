@@ -19,6 +19,9 @@ The first public release.
   across their bands, with a rattle that gates a layer at the body's
   fundamental as snare wires do; all summed into a tanh drive and computed at
   32 times the sample rate. A render depends only on its patch and its seed.
+- Up to two rims, struck with the head or instead of it, for rimshots and
+  cross-sticks: each a set of up to eight modes at their own frequencies in
+  Hz, untouched by the tuning and the glide, with its own damping and shape.
 - The validated domain: every render reports whether it lies where its
   aliasing is demonstrated below −100 dB, from a rule refit on an adversarial
   grid of 957 fixtures, with the cause of any predicted aliasing and the

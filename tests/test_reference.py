@@ -109,6 +109,31 @@ def test_kink_bound_is_an_upper_bound(rise_ms: float) -> None:
     assert v.error.max_abs >= bound / USEFUL  # and a useful one
 
 
+@pytest.mark.parametrize(("rise_ms", "hz"), [(0.01, (6000.0, 11000.0, 19000.0)), (0.05, (1630.0, 4210.0))])
+def test_kink_bound_holds_for_a_rim(rise_ms: float, hz: tuple[float, ...]) -> None:
+    """Find the kink bound above the measured error of a rim struck in 10–50 µs, and within a factor of 100 of it."""
+    p = make(
+        **{
+            "body.level_db": -math.inf,
+            "noise[1].level_db": -math.inf,
+            "noise[2].level_db": -math.inf,
+            "rim": [
+                {
+                    "level_db": 0.0,
+                    "damping": 1.0,
+                    "modes": [{"hz": f, "level_db": -3.0 * i} for i, f in enumerate(hz)],
+                    "amp": amp((0, 0), (rise_ms, 1), (rise_ms + 0.3, 0.4), (6, 0)),
+                },
+            ],
+        },
+    )
+    v = reference.verify_take(p)
+    bound = synthesize(p).kink
+    assert v.passed
+    assert v.error.max_abs <= bound
+    assert v.error.max_abs >= bound / USEFUL
+
+
 def test_verify_judges_every_take() -> None:
     """Verify two takes: seeds 1 and 2, each reported, and the count that pass."""
     v = reference.verify(make(**{"noise[2].level_db": 0.0, "drive.db": 12.0}), takes=2)

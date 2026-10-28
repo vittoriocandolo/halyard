@@ -3,14 +3,16 @@
 
 """The modal body, the noise layers and the drive as pure functions of time (plan §2.3–§2.5, §3, §5).
 
-    x(t) = b(t) + Σ_j w_j(t),    y(t) = S_α(x(t))
+    x(t) = b(t) + Σ_j w_j(t) + Σ_k c_k(t),    y(t) = S_α(x(t))
 
     b(t)   = Σ_i g_b a_i E_i(t) sin φ_i(t),    φ_i = r_i φ_1,    φ_1 = 2π f0 R(t),    R(t) = ∫_0^t r
     w_j(t) = g_j e_j(t) q_j(t) n_j(t),    q_j = 1 − d_j e_b(t) (1 − cos φ_1(t)) / 2
+    c_k(t) = Σ_i g_k a_ki E_ki(t) sin 2π f_ki t
 
 E_i is the body shape e_b with its decay compressed by s_i = r_i^β, itself a
 Hermite curve (`curve.compressed`), and q_j is layer j's rattle, gated at the
-body's fundamental. Nothing here keeps state: sample n at rate F is computed
+body's fundamental. The rim k rings at its own frequencies f_ki, unglided, its
+shape compressed by (f_ki / f_k1)^β_k in the same way. Nothing here keeps state: sample n at rate F is computed
 from t_n = n / F alone, so a block boundary, a longer render or a different
 rate never changes a sample's value.
 """
@@ -68,6 +70,16 @@ class Mode:
 
 
 @dataclass(frozen=True)
+class Ring:
+    """A rim mode: its rim, its frequency, its gain and its envelope."""
+
+    rim: int  # the rim's index, from 0
+    hz: float
+    gain: float  # g_k · a_ki; 0 when the rim is silent
+    env: Curve  # E_ki: the rim's shape, its decay compressed by (hz / hz_1)^damping
+
+
+@dataclass(frozen=True)
 class Layer:
     """A noise layer: its gain, its band, its rattle depth and its shape."""
 
@@ -87,6 +99,7 @@ class Voice:
     body_amp: Curve  # e_b, which also gates the rattle
     modes: tuple[Mode, ...]
     layers: tuple[Layer, ...]  # in patch order, silent ones included, so paths keep their numbers
+    rings: tuple[Ring, ...]  # every rim's modes, in patch order
     alpha: float
     t_src: float
 
@@ -118,6 +131,14 @@ def voice(p: Patch) -> Voice:
         Layer(10.0 ** (n.level_db / 20.0), n.band_hz, n.rattle, amplitude_curve(_seconds(n.amp), [g for _, g in n.amp]))
         for n in p.noise
     )
+    rings = []
+    for k, r in enumerate(p.rim):
+        rim_amp = amplitude_curve(_seconds(r.amp), [g for _, g in r.amp])
+        g_k, first = 10.0 ** (r.level_db / 20.0), r.modes[0][0]
+        rings += [
+            Ring(k, hz, g_k * 10.0 ** (level / 20.0), compressed(rim_amp, (hz / first) ** r.damping))
+            for hz, level in r.modes
+        ]
     return Voice(
         seed=p.seed,
         f0=b.tune_hz,
@@ -125,6 +146,7 @@ def voice(p: Patch) -> Voice:
         body_amp=body_amp,
         modes=modes,
         layers=layers,
+        rings=tuple(rings),
         alpha=drive_alpha(p.drive.db),
         t_src=p.length_ms / 1000,
     )
@@ -177,6 +199,10 @@ def sources(v: Voice, rate: int, n0: int, n1: int, tabs: Tables) -> Floats:
         a, b = n0 + s.start, n0 + s.stop
         # Noise shapes end by 1 s, the table's period, so the index wraps only for a knot at exactly 1 s.
         x[s] += env * (table[a:b] if b <= rate else table[np.arange(a, b) % rate])
+    for ring in v.rings:
+        if ring.gain:
+            s = _support(t, ring.env)
+            x[s] += ring.gain * ring.env.on(t[s]) * np.sin((TWO_PI * ring.hz) * t[s])
     return x
 
 
@@ -392,6 +418,13 @@ def state(v: Voice, times: ArrayLike, rate: int, tabs: Tables) -> State:
         x += q * c
         dx += dq * c + q * dc
         parts[j] = Part(c, dc, q, dq, n, dn)
+    for ring in v.rings:
+        if ring.gain:
+            e, de = ring.env(t), ring.env.derivative(t)
+            w = TWO_PI * ring.hz
+            sn, cs = np.sin(w * t), np.cos(w * t)
+            x += ring.gain * e * sn
+            dx += ring.gain * (de * sn + e * cs * w)
     return State(phi1, dphi1, gate, dgate, eb, deb, x, dx, parts)
 
 
@@ -424,11 +457,11 @@ class Row(NamedTuple):
 
 
 def kink_terms(v: Voice, rate: int, tabs: Tables | None = None) -> Kinks:
-    """Return every source's jumps at every knot (plan §5): modes, the peak, pitch knots, rattle and layers."""
+    """Return every source's jumps at every knot (plan §5): modes, the peak, pitch knots, rattle, layers and rims."""
     if tabs is None:
         tabs = tables(v, rate)
     rows = [*_mode_rows(v, rate, tabs), *_rattle_rows(v, rate, tabs), *_pitch_rows(v, rate, tabs)]
-    rows += _layer_rows(v, rate, tabs)
+    rows += [*_layer_rows(v, rate, tabs), *_ring_rows(v, rate, tabs)]
     if not rows:
         empty = np.zeros(0)
         return Kinks((), empty, empty, empty, empty, empty)
@@ -516,6 +549,21 @@ def _layer_rows(v: Voice, rate: int, tabs: Tables) -> list[Row]:
                 layer.gain * (j3 * q * n + 3 * j2 * (dq * n + q * dn)),
             ),
         )
+    return rows
+
+
+def _ring_rows(v: Voice, rate: int, tabs: Tables) -> list[Row]:
+    """Return the rim modes' jumps: each ring's compressed shape, like the body modes', at a constant frequency."""
+    rows = []
+    for ring in v.rings:
+        if not ring.gain:
+            continue
+        s = state(v, ring.env.t, rate, tabs)
+        j2, j3 = ring.env.jumps()
+        w = TWO_PI * ring.hz
+        sn, cs = np.sin(w * ring.env.t), np.cos(w * ring.env.t)
+        paths = [f"rim[{ring.rim + 1}].amp[{k}]" for k in range(1, ring.env.t.size + 1)]
+        rows.append(Row(paths, ring.env.t, s, ring.gain * j2 * sn, ring.gain * (j3 * sn + 3 * j2 * cs * w)))
     return rows
 
 

@@ -174,6 +174,19 @@ def test_report() -> None:
     clap = render.render(loads(cli.reference_text("clap")))[1]
     assert "(the body is silent)" in str(clap)
     assert not clap.body_sounds
+    rims = [
+        {
+            "level_db": -6.0,
+            "damping": 1.0,
+            "modes": [{"hz": f, "level_db": 0.0}],
+            "amp": [{"ms": m, "gain": g} for m, g in ((0, 0), (0.2, 1), (6, 0))],
+        }
+        for f in (1630.0, 700.0)
+    ]
+    rims[1]["level_db"] = -math.inf
+    struck = str(render.render(make(rim=rims))[1])
+    assert "; rim 1 1630.0 Hz" in struck
+    assert "rim 2" not in struck  # a silent rim has no tuning to report
 
 
 def test_domain_rule() -> None:

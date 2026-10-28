@@ -51,6 +51,23 @@ def modes(*pairs: tuple[float, float]) -> Knots:
     return [{"ratio": r, "level_db": v} for r, v in pairs]
 
 
+def rim(
+    *hz: tuple[float, float],
+    level_db: float = -6.0,
+    damping: float = 1.0,
+    shape: Knots | None = None,
+) -> list[dict[str, object]]:
+    """Write one [[rim]] as TOML parses it: its modes in Hz with their levels, and its shape."""
+    return [
+        {
+            "level_db": level_db,
+            "damping": damping,
+            "modes": [{"hz": f, "level_db": v} for f, v in hz],
+            "amp": shape or amp((0, 0), (0.15, 1), (1.2, 0.3), (8, 0)),
+        },
+    ]
+
+
 def silent_layers(**edits: object) -> dict[str, object]:
     """Return edits that silence both layers, and these."""
     return {"noise[1].level_db": -math.inf, "noise[2].level_db": -math.inf, **edits}
@@ -72,6 +89,12 @@ def x_exact(p: Patch, times: ArrayLike) -> Floats:
             e = amplitude_curve([m / 1000 for m, _ in layer.amp], [g for _, g in layer.amp])
             q = 1 - layer.rattle * eb(t) * (1 - np.cos(2 * np.pi * b.tune_hz * turns)) / 2
             x += 10 ** (layer.level_db / 20) * e(t) * q * noise.at(p.seed, *layer.band_hz, t)
+    for r in p.rim:
+        if r.level_db > -math.inf:
+            er = amplitude_curve([m / 1000 for m, _ in r.amp], [g for _, g in r.amp])
+            for hz, level in r.modes:
+                e = compressed(er, (hz / r.modes[0][0]) ** r.damping)
+                x += 10 ** (r.level_db / 20) * 10 ** (level / 20) * e(t) * np.sin(2 * np.pi * hz * t)
     return x
 
 
@@ -140,6 +163,8 @@ def test_slope_and_curvature_are_the_derivatives() -> None:
         },
         {"body.level_db": -math.inf, "noise[2].rattle": 0.8},  # a silent body still gates the rattle
         {"noise[1].level_db": -math.inf, "seed": 2**63 - 1},
+        {"rim": rim((1630, 0), (4210, -8), (9870, -20))},
+        {"rim": [*rim((440, -3), (2500, 0), damping=2.5), *rim((700, 0), level_db=-math.inf)], "drive.db": 24.0},
     ],
 )
 def test_sources_are_the_model(edits: dict[str, object]) -> None:
@@ -231,6 +256,32 @@ def test_source_length_and_sample_count() -> None:
 
 
 # Tuning, modes and damping.
+
+
+def test_a_rim_rings_at_its_own_frequencies_whatever_the_tuning_and_glide() -> None:
+    """Find a rim's modes at their Hz to 0.001 cent, untouched by the body's tuning and its glide."""
+    hz = (1630.0, 4210.0, 6950.0)
+    held = amp((0, 0), (1, 1), (1990, 1), (2000, 0))
+    rate = 48000
+    n0, n1 = int(0.1 * rate), int(1.9 * rate)
+    t = np.arange(n0, n1) / rate
+    seen = []
+    for tune, glide in ((185.0, pitch((0, 1.5), (15, 1))), (700.0, pitch((0, 1), (15, 1)))):
+        p = make(
+            **silent_layers(
+                **{
+                    "body.level_db": -math.inf,
+                    "body.tune_hz": tune,
+                    "body.pitch": glide,
+                    "rim": rim(*[(f, -3.0 * i) for i, f in enumerate(hz)], damping=0.0, shape=held),
+                },
+            ),
+        )
+        x = x_internal(p, rate, n0, n1)
+        f = fit_frequencies(t, x, [f * (1 + 1e-5) for f in hz])
+        assert np.max(np.abs(1200 * np.log2(f / np.array(hz)))) <= CENTS
+        seen.append(x)
+    assert np.array_equal(seen[0], seen[1])
 
 
 def fit_frequencies(t: Floats, x: Floats, guesses: list[float]) -> Floats:
@@ -484,9 +535,16 @@ KINKY = {
 }
 
 
-def test_every_jump_matches_the_model() -> None:
+KINKY_RIM = {
+    **KINKY,
+    "rim": rim((1630, 0), (4210, -6), damping=1.5, shape=amp((0.2, 0), (0.35, 1), (1.1, 0.4), (4, 0.1), (9, 0))),
+}
+
+
+@pytest.mark.parametrize("kinky", [KINKY, KINKY_RIM], ids=["body and layers", "with a rim"])
+def test_every_jump_matches_the_model(kinky: dict[str, object]) -> None:
     """Find each knot's jumps in x″ and x‴ as one-sided derivatives of the model measure them."""
-    p = make(**KINKY)
+    p = make(**kinky)
     v = voice.voice(p)
     k = voice.kink_terms(v, RATE)
     times = np.unique(k.t)
@@ -533,7 +591,7 @@ def test_jumps_through_the_saturator() -> None:
 
 def test_kink_bound_form() -> None:
     """Find the kink bound's form: its sum over knots, at many drives at once, its weights and its paths."""
-    p = make(**KINKY, **{"drive.db": 12.0})
+    p = make(**KINKY_RIM, **{"drive.db": 12.0})
     v = voice.voice(p)
     k = voice.kink_terms(v, RATE)
     total = voice.kink_bound(k, v.alpha, RATE, BAND)
@@ -551,7 +609,14 @@ def test_kink_bound_form() -> None:
     assert w3 == pytest.approx(1.01 * 4 * np.pi**4 / 90 * BAND / (2 * np.pi * RATE) ** 4, rel=1e-15)
     # Paths name knots as the parser does, counting from 1.
     paths = {path for path, _ in voice.kink_knots(k, v.alpha, RATE, BAND)}
-    assert {"body.amp[1]", "body.amp[5]", "body.pitch[2]", "noise[1].amp[5]", "noise[2].amp[4]"} <= paths
+    assert {
+        "body.amp[1]",
+        "body.amp[5]",
+        "body.pitch[2]",
+        "noise[1].amp[5]",
+        "noise[2].amp[4]",
+        "rim[1].amp[2]",
+    } <= paths
 
 
 def test_silence_has_no_kinks() -> None:

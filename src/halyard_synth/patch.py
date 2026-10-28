@@ -48,6 +48,9 @@ MAX_KNOTS = 32
 MIN_SPACING_MS = Decimal("0.01")  # 10 µs, compared on the decimal values as written
 MAX_SEED = 2**63 - 1
 MAX_BURSTS = 10
+MAX_RIMS = 2
+MAX_RIM_MODES = 8
+RIM_HZ = (100.0, 20000.0)  # where a rim's modes may lie
 PAIR = 2  # a knot, a mode and a band are pairs
 LOWEST_HZ, HIGHEST_HZ = 10.0, 20000.0  # where a body frequency may go
 
@@ -84,6 +87,16 @@ class Layer:
 
 
 @dataclass(frozen=True)
+class Rim:
+    """The rim struck with or instead of the head: the hoop's ring and the stick's knock, as modes in Hz."""
+
+    level_db: float
+    damping: float
+    modes: Knots  # ((hz, level_db), ...)
+    amp: Knots  # ((ms, gain), ...)
+
+
+@dataclass(frozen=True)
 class Drive:
     """The saturator's small-signal gain."""
 
@@ -108,6 +121,7 @@ class Patch:
     seed: int
     body: Body
     noise: tuple[Layer, ...]
+    rim: tuple[Rim, ...]
     drive: Drive
     output: Output
 
@@ -125,7 +139,8 @@ class Patch:
         A silent body still gates rattle, but only inside the layers it gates, so
         it never lengthens the sound. With nothing audible the length is 0.
         """
-        ends = [layer.amp[-1][0] for layer in self.noise if layer.level_db > -math.inf]
+        shapes = [(s.level_db, s.amp) for s in self.noise] + [(r.level_db, r.amp) for r in self.rim]
+        ends = [amp[-1][0] for level_db, amp in shapes if level_db > -math.inf]
         if self.body.level_db > -math.inf:
             ends.append(self.body.amp[-1][0])
         return max(ends, default=0.0)
@@ -244,6 +259,11 @@ def _validate(p: Patch, problems: _Problems) -> None:
         problems.add("noise", "expected noise layers")
     else:
         _validate_layers(noise, problems)
+    rim: object = p.rim
+    if not isinstance(rim, tuple) or not all(isinstance(r, Rim) for r in rim):
+        problems.add("rim", "expected rims")
+    else:
+        _validate_rims(rim, problems)
     _validate_drive(p.drive, problems)
     _validate_output(p.output, problems)
 
@@ -342,6 +362,37 @@ def _validate_layer(layer: Layer, path: str, problems: _Problems) -> None:
     problems.shape(f"{path}.amp", layer.amp, MAX_NOISE_MS)
 
 
+def _validate_rims(rims: tuple[Rim, ...], problems: _Problems) -> None:
+    """Check the rims: how many, and each."""
+    if len(rims) > MAX_RIMS:
+        problems.add("rim", f"at most {MAX_RIMS} rims, found {len(rims)}")
+    for j, r in enumerate(rims, 1):
+        path = f"rim[{j}]"
+        problems.number(f"{path}.level_db", r.level_db, -90.0, 24.0, silence=True)
+        problems.number(f"{path}.damping", r.damping, 0.0, 3.0)
+        _validate_rim_modes(r.modes, path, problems)
+        problems.shape(f"{path}.amp", r.amp, MAX_BODY_MS)
+
+
+def _validate_rim_modes(modes: object, path: str, problems: _Problems) -> None:
+    """Check a rim's modes: 1 to 8, in Hz from 100 Hz to 20 kHz, increasing, the loudest exactly 0 dB."""
+    where = f"{path}.modes"
+    if not isinstance(modes, tuple) or not all(isinstance(m, tuple) and len(m) == PAIR for m in modes):
+        problems.add(where, "expected (hz, level_db) modes")
+        return
+    if not 1 <= len(modes) <= MAX_RIM_MODES:
+        problems.add(where, f"needs 1 to {MAX_RIM_MODES} modes, found {len(modes)}")
+        return
+    found = [problems.number(f"{where}[{i}].hz", hz, RIM_HZ[0], RIM_HZ[1]) for i, (hz, _) in enumerate(modes, 1)]
+    given = [problems.number(f"{where}[{i}].level_db", v, -60.0, 0.0) for i, (_, v) in enumerate(modes, 1)]
+    for i, (a, b) in enumerate(itertools.pairwise(found), 2):
+        if a is not None and b is not None and not b > a:
+            problems.add(f"{where}[{i}].hz", "rim modes must strictly increase")
+    levels = [v for v in given if v is not None]
+    if len(levels) == len(given) and max(levels) != 0.0:
+        problems.add(where, f"the loudest mode must be exactly 0 dB, found {max(levels)!r}")
+
+
 def _validate_drive(d: object, problems: _Problems) -> None:
     """Check the drive."""
     if not isinstance(d, Drive):
@@ -368,6 +419,7 @@ _FIELDS = {
     "": ("instrument", "schema", "seed", "body", "noise", "drive", "output"),
     "body": ("tune_hz", "level_db", "damping", "modes", "pitch", "amp"),
     "noise": ("level_db", "band_hz", "rattle", "amp"),
+    "rim": ("level_db", "damping", "modes", "amp"),
     "drive": ("db",),
     "output": ("sample_rate", "format", "mode", "db", "polarity"),
 }
@@ -476,6 +528,27 @@ def _noise(problems: _Problems, data: dict[str, Any]) -> tuple[Layer, ...] | Non
     return layers
 
 
+def _rims(problems: _Problems, data: dict[str, Any]) -> tuple[Rim, ...] | None:
+    """Build and check the rims, none when there is no [[rim]]; None after reporting what is wrong."""
+    tables = data.get("rim", [])
+    if not isinstance(tables, list) or not all(isinstance(t, dict) for t in tables):
+        problems.add("rim", f"expected an array of tables ([[rim]]), found {_kind(tables)}")
+        return None
+    built = []
+    for j, table in enumerate(tables, 1):
+        t = _section(problems, f"rim[{j}]", table, _FIELDS["rim"])
+        modes = amp = None
+        if t is not None:
+            modes = _pairs(problems, f"rim[{j}].modes", t["modes"], ("hz", "level_db"))
+            amp = _pairs(problems, f"rim[{j}].amp", t["amp"], ("ms", "gain"))
+        built.append(None if t is None or modes is None or amp is None else (t, modes, amp))
+    rims = tuple(Rim(_float(t["level_db"]), _float(t["damping"]), m, a) for t, m, a in (b for b in built if b))
+    if len(rims) < len(built):
+        return None
+    _validate_rims(rims, problems)
+    return rims
+
+
 def _drive(problems: _Problems, data: dict[str, Any]) -> Drive | None:
     """Build and check the drive; None after reporting what is wrong."""
     if "drive" not in data or (t := _section(problems, "drive", data["drive"], _FIELDS["drive"])) is None:
@@ -500,17 +573,18 @@ def from_dict(data: object) -> Patch:
         raise PatchError(["expected a table"])
     _header(data)
     problems = _Problems()
-    _keys(problems, "", data, _FIELDS[""])
+    _keys(problems, "", {k: v for k, v in data.items() if k != "rim"}, _FIELDS[""])  # [[rim]] is optional
     if "seed" in data:
         _validate_seed(data["seed"], problems)
     body = _body(problems, data["body"]) if "body" in data else None
     if body is not None:
         _validate_body(body, problems)
-    noise, drive, output = _noise(problems, data), _drive(problems, data), _output(problems, data)
+    noise, rim = _noise(problems, data), _rims(problems, data)
+    drive, output = _drive(problems, data), _output(problems, data)
     # Anything missing or unbuilt has been reported, so with no problem every part is there and checked.
-    if problems or body is None or noise is None or drive is None or output is None:
+    if problems or body is None or noise is None or rim is None or drive is None or output is None:
         raise PatchError(problems)
-    return Patch(data["seed"], body, noise, drive, output)
+    return Patch(data["seed"], body, noise, rim, drive, output)
 
 
 def loads(text: str) -> Patch:
@@ -561,6 +635,21 @@ def to_dict(p: Patch) -> dict[str, Any]:
             }
             for n in p.noise
         ],
+        **(
+            {
+                "rim": [
+                    {
+                        "level_db": r.level_db,
+                        "damping": r.damping,
+                        "modes": [{"hz": hz, "level_db": v} for hz, v in r.modes],
+                        "amp": [{"ms": m, "gain": g} for m, g in r.amp],
+                    }
+                    for r in p.rim
+                ],
+            }
+            if p.rim
+            else {}
+        ),
         "drive": {"db": p.drive.db},
         "output": {
             "sample_rate": p.output.sample_rate,
@@ -609,6 +698,16 @@ def dumps(p: Patch) -> str:
             ],
         )
         lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in n.amp], "")
+    for j, r in enumerate(p.rim, 1):
+        lines += ["", _note("[[rim]]", f"rim[{j}]: the hoop's ring and the stick's knock")]
+        lines += _rows(
+            [
+                ("level_db", _f(r.level_db), ""),
+                ("damping", _f(r.damping), "mode i decays (hz_i / hz_1)^damping times faster"),
+            ],
+        )
+        lines += _array("modes", [(("hz", hz), ("level_db", v)) for hz, v in r.modes], "loudest mode exactly 0 dB")
+        lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in r.amp], "")
     lines += ["", "[drive]", *_rows([("db", _f(p.drive.db), "small-signal gain; 0 = bypass")])]
     lines += ["", "[output]"]
     lines += _rows(
@@ -719,7 +818,8 @@ def tune(p: Patch, text: str) -> Patch:
 
 def curve_names(p: Patch) -> tuple[str, ...]:
     """Name every curve of the patch by its path."""
-    return ("body.pitch", "body.amp", *(f"noise[{j}].amp" for j in range(1, len(p.noise) + 1)))
+    noise = (f"noise[{j}].amp" for j in range(1, len(p.noise) + 1))
+    return ("body.pitch", "body.amp", *noise, *(f"rim[{j}].amp" for j in range(1, len(p.rim) + 1)))
 
 
 def _get_curve(p: Patch, name: str) -> Knots:
@@ -728,6 +828,8 @@ def _get_curve(p: Patch, name: str) -> Knots:
         return p.body.pitch
     if name == "body.amp":
         return p.body.amp
+    if name.startswith("rim["):
+        return p.rim[int(name[len("rim[") : name.index("]")]) - 1].amp
     return p.noise[_layer_index(p, name[: -len(".amp")])].amp
 
 
@@ -742,7 +844,11 @@ def _set_curves(p: Patch, curves: dict[str, Knots]) -> Patch:
         dataclasses.replace(layer, amp=curves[f"noise[{j}].amp"]) if f"noise[{j}].amp" in curves else layer
         for j, layer in enumerate(p.noise, 1)
     )
-    return dataclasses.replace(p, body=body, noise=noise)
+    rim = tuple(
+        dataclasses.replace(r, amp=curves[f"rim[{j}].amp"]) if f"rim[{j}].amp" in curves else r
+        for j, r in enumerate(p.rim, 1)
+    )
+    return dataclasses.replace(p, body=body, noise=noise, rim=rim)
 
 
 def _layer_index(p: Patch, name: str) -> int:
@@ -958,7 +1064,15 @@ def softer(p: Patch, db: float, glide: float = 2.0, contact: float = 0.2) -> Pat
             amp = _lengthen_rises(amp, Decimal(repr(v**-contact)))
             band = (band[0], float(round(_dec(band[1]) * Decimal(repr(v**contact)), 1)))
         layers.append(dataclasses.replace(layer, level_db=level(layer.level_db), band_hz=band, amp=amp))
+    rims = [
+        dataclasses.replace(
+            r,
+            level_db=level(r.level_db),
+            amp=_lengthen_rises(r.amp, Decimal(repr(v**-contact))) if contact else r.amp,
+        )
+        for r in p.rim
+    ]
     if contact:
         body_amp = _lengthen_rises(b.amp, Decimal(repr(v**-contact)))
     body = dataclasses.replace(b, level_db=level(b.level_db), pitch=pitch, amp=body_amp)
-    return dataclasses.replace(p, body=body, noise=tuple(layers))
+    return dataclasses.replace(p, body=body, noise=tuple(layers), rim=tuple(rims))

@@ -120,6 +120,20 @@ def random_patch(rng: np.random.Generator) -> patch.Patch:
                 shape(int(rng.integers(3, 33)), float(rng.uniform(0, 5)), 990),
             ),
         )
+    rims = []
+    for _ in range(int(rng.integers(0, patch.MAX_RIMS + 1))):
+        k = int(rng.integers(1, patch.MAX_RIM_MODES + 1))
+        hz = np.sort(rng.choice(np.arange(100, 20001), k, replace=False)).astype(float)
+        db = list(rng.uniform(-60, 0, k))
+        db[int(rng.integers(k))] = 0.0
+        rims.append(
+            patch.Rim(
+                float(rng.choice([-math.inf, rng.uniform(-90, 24)])),
+                float(rng.uniform(0, 3)),
+                tuple(zip(hz.tolist(), db, strict=True)),
+                shape(int(rng.integers(3, 33)), float(rng.uniform(0, 5)), 1990),
+            ),
+        )
     mode = str(rng.choice(patch.MODES))
     return patch.Patch(
         seed=int(rng.integers(0, 2**63 - 1)),
@@ -132,6 +146,7 @@ def random_patch(rng: np.random.Generator) -> patch.Patch:
             shape(int(rng.integers(3, 33)), float(rng.uniform(0, 5)), 1990),
         ),
         noise=tuple(layers),
+        rim=tuple(rims),
         drive=patch.Drive(float(rng.uniform(0, 48))),
         output=patch.Output(
             int(rng.choice(patch.SAMPLE_RATES)),
@@ -864,3 +879,101 @@ def test_a_patch_that_is_not_text_is_refused(tmp_path: Path) -> None:
     assert problems(patch.load, path) == ["not UTF-8 or UTF-16 text"]
     path.write_bytes(b"instrument = \xff\n")
     assert problems(patch.load, path) == ["not UTF-8 or UTF-16 text"]
+
+
+# Rims.
+
+
+def rim(*hz: tuple[float, float], level_db: float = -6.0) -> dict[str, Any]:
+    """Write one [[rim]] table as TOML parses it."""
+    return {
+        "level_db": level_db,
+        "damping": 1.0,
+        "modes": [{"hz": f, "level_db": v} for f, v in hz],
+        "amp": amp((0, 0), (0.15, 1), (1.2, 0.3), (8, 0)),
+    }
+
+
+RIM = rim((1630, 0), (4210, -8))
+LATE_RIM_MS = 400.0  # where a long rim's shape ends
+
+
+def test_rims_are_optional_and_at_most_two(example_dict: dict[str, Any]) -> None:
+    """Read no [[rim]] as none, one or two as written, and refuse three or anything but tables."""
+    assert from_dict(example_dict).rim == ()
+    one = from_dict(dict(example_dict, rim=[RIM]))
+    assert one.rim == (
+        patch.Rim(-6.0, 1.0, ((1630.0, 0.0), (4210.0, -8.0)), ((0.0, 0.0), (0.15, 1.0), (1.2, 0.3), (8.0, 0.0))),
+    )
+    assert len(from_dict(dict(example_dict, rim=[RIM, RIM])).rim) == patch.MAX_RIMS
+    assert "rim: at most 2 rims, found 3" in problems(from_dict, dict(example_dict, rim=[RIM] * 3))
+    assert "rim: expected an array of tables ([[rim]]), found a table" in problems(
+        from_dict,
+        dict(example_dict, rim=RIM),
+    )
+    assert "rim[1].damping: missing" in problems(
+        from_dict,
+        dict(example_dict, rim=[{k: v for k, v in RIM.items() if k != "damping"}]),
+    )
+    assert "rim[1].amp: expected an array of { ms, gain } tables, found a string" in problems(
+        from_dict,
+        dict(example_dict, rim=[dict(RIM, amp="x")]),
+    )
+    assert "rim[2].modes[1]: expected a { hz, level_db } table, found int" in problems(
+        from_dict,
+        dict(example_dict, rim=[RIM, dict(RIM, modes=[1])]),
+    )
+
+
+def test_rim_modes(example_dict: dict[str, Any]) -> None:
+    """Require 1 to 8 modes from 100 Hz to 20 kHz, strictly increasing, the loudest exactly 0 dB."""
+
+    def found(r: dict[str, Any]) -> list[str]:
+        return problems(from_dict, dict(example_dict, rim=[r]))
+
+    from_dict(dict(example_dict, rim=[rim((100, 0)), rim(*[(1000 * k, -k + 1.0) for k in range(1, 9)])]))
+    assert "rim[1].modes: needs 1 to 8 modes, found 0" in found(rim())
+    assert "rim[1].modes: needs 1 to 8 modes, found 9" in found(rim(*[(1000 * k, 0.0) for k in range(1, 10)]))
+    assert any(m.startswith("rim[1].modes[1].hz:") for m in found(rim((99, 0))))
+    assert any(m.startswith("rim[1].modes[2].hz:") for m in found(rim((1000, 0), (20001, -3))))
+    assert "rim[1].modes[2].hz: rim modes must strictly increase" in found(rim((1000, 0), (1000, -3)))
+    assert any(m.startswith("rim[1].modes[2].level_db:") for m in found(rim((1000, 0), (2000, -61))))
+    assert "rim[1].modes: the loudest mode must be exactly 0 dB, found -3.0" in found(rim((1000, -3), (2000, -6)))
+    assert any(m.startswith("rim[1].level_db:") for m in found(rim((1000, 0), level_db=25)))
+    assert from_dict(dict(example_dict, rim=[rim((1000, 0), level_db=-math.inf)])).rim[0].level_db == -math.inf
+    p = from_dict(dict(example_dict, rim=[RIM]))
+    single = cast("Any", ((1000.0,),))  # deliberately wrong: a mode of one number
+    assert "rim: expected rims" in problems(dataclasses.replace, p, rim=[p.rim[0]])
+    assert "rim[1].modes: expected (hz, level_db) modes" in problems(
+        dataclasses.replace,
+        p,
+        rim=(dataclasses.replace(p.rim[0], modes=single),),
+    )
+
+
+def test_rims_are_written_after_the_layers_and_only_when_there_are_some(example_dict: dict[str, Any]) -> None:
+    """Write each rim as a [[rim]] block after the layers, and none when there is none."""
+    assert "[[rim]]" not in dumps(loads(EXAMPLE))
+    p = from_dict(dict(example_dict, rim=[RIM, rim((700, 0), level_db=-math.inf)]))
+    text = dumps(p)
+    assert text.count("[[rim]]") == len(p.rim)
+    assert text.index("[[noise]]") < text.index("[[rim]]") < text.index("[drive]")
+    assert loads(text) == p
+    assert patch.to_dict(p)["rim"][1]["level_db"] == -math.inf
+
+
+def test_rims_count_in_the_length_and_take_their_edits(example_dict: dict[str, Any]) -> None:
+    """Count an audible rim's shape in the length, stretch it by its path, and strike it softer."""
+    late = dict(RIM, amp=amp((0, 0), (0.15, 1), (1.2, 0.3), (LATE_RIM_MS, 0)))
+    p = from_dict(dict(example_dict, rim=[late]))
+    assert p.length_ms == LATE_RIM_MS
+    assert from_dict(dict(example_dict, rim=[dict(late, level_db=-math.inf)])).length_ms == WIRES_MS
+    assert patch.curve_names(p)[-1] == "rim[1].amp"
+    assert patch.stretch(p, "rim[1].amp", 0.5).rim[0].amp == ((0.0, 0.0), (0.15, 1.0), (0.675, 0.3), (200.075, 0.0))
+    assert patch.stretch(p, "all", 0.5).rim[0].amp[-1] == (200.075, 0.0)
+    assert problems(patch.stretch, p, "rim[2].amp", 2.0)[0].startswith("rim[2].amp: not a curve of this patch")
+    q = patch.softer(p, 12)
+    assert q.rim[0].level_db == p.rim[0].level_db - 12
+    assert q.rim[0].amp[1] == (0.198, 1.0)  # the rise lengthens by v^(−1/5), as the others'
+    assert (q.rim[0].modes, q.rim[0].damping) == (p.rim[0].modes, p.rim[0].damping)
+    assert patch.softer(p, 12, contact=0).rim[0].amp == p.rim[0].amp

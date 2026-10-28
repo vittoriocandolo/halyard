@@ -93,6 +93,26 @@ A typical snare has a short, wide **stick** layer (the click) and a longer
 Layers are how the noise changes colour over time: a bright, short layer over
 a darker, longer one.
 
+### Rims
+
+Up to two `[[rim]]` tables, or none: the rim struck with the head, as in a
+rimshot, or instead of it, as in a cross-stick. A rim rings at its own
+frequencies, in Hz, for a hoop and a stick have no harmonic relation to the
+head: it ignores `tune_hz` and the glide, and never rattles the wires.
+
+| Field | Range | What it does |
+|---|---|---|
+| `level_db` | −inf, −90 – +24 | The rim's level. |
+| `damping` | 0 – 3 | Mode i decays (hz_i / hz_1)^damping times faster than the first, from the rim's peak on. |
+| `modes` | 1 – 8 | `{ hz, level_db }`, from 100 Hz to 20 kHz, strictly increasing, the loudest exactly 0 dB. |
+| `amp` | 3 – 32 knots | The rim's shape, within 2 s. |
+
+A **rimshot** is a body and its wires with a loud, short rim on top, a few
+modes between 1 and 10 kHz; a **cross-stick** is the rim alone, or with a
+quiet body and no wires, its modes lower and its shape a few milliseconds
+long. `halyard softer` lowers a rim's level and lengthens its rises like the
+others'; `halyard stretch` names its shape `rim[1].amp`.
+
 ### Drive
 
 `drive.db`, 0 – 48 dB, is the small-signal gain of a tanh saturator on the sum
