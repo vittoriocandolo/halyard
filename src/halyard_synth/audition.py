@@ -314,8 +314,10 @@ class Watcher:
         self._stamp: tuple[int, int] | None = None
         self._text = text
         self._pending: tuple[int, str] | None = None
+        self._stopped = False
         self._cv = threading.Condition()
-        threading.Thread(target=self._run, daemon=True).start()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
 
     def poll(self) -> None:
         """Start a new generation if the file's content changed."""
@@ -334,20 +336,31 @@ class Watcher:
         self.request(text)
 
     def request(self, text: str) -> None:
-        """Render this text as a new generation."""
+        """Render this text as a new generation, unless stopped."""
         with self._cv:
+            if self._stopped:
+                return
             self.generation += 1
             self._pending = (self.generation, text)  # an older request not yet started is superseded
             self._cv.notify()
 
+    def stop(self) -> None:
+        """Stop watching: drop a pending request, and report no render that finishes after this."""
+        with self._cv:
+            self._stopped = True
+            self._pending = None
+            self._cv.notify()
+
     def _run(self) -> None:
-        """Render each pending request, and report it."""
+        """Render each pending request, and report it, until stopped."""
         while True:
             with self._cv:
-                while self._pending is None:
+                while self._pending is None and not self._stopped:
                     self._cv.wait()
-                generation, text = self._pending
-                self._pending = None
+                pending, self._pending = self._pending, None
+            if pending is None:  # stopped
+                return
+            generation, text = pending
             start = time.perf_counter()
             try:
                 result = self.work(text)
@@ -355,6 +368,8 @@ class Watcher:
                 result = e
             elapsed = time.perf_counter() - start
             with self._cv:
+                if self._stopped:
+                    return
                 newest = generation == self.generation
             self.done(generation, result, elapsed, newest=newest)
 
@@ -541,6 +556,11 @@ class Session:
                 self._pairs_said += 1
                 self.out.write(f"pair {self._pairs_said}\n")
 
+    def close(self) -> None:
+        """Stop every watcher."""
+        for w in self.watchers:
+            w.stop()
+
     def reveal(self) -> str | None:
         """Return the blind order, once audition stops: R is the render, S the sample."""
         if not self.blind:
@@ -610,6 +630,7 @@ def audition(
     except KeyboardInterrupt:
         return 0
     finally:
+        session.close()
         revealed = session.reveal()
         if revealed:
             report.write(f"{revealed}\n")

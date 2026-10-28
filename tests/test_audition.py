@@ -697,3 +697,55 @@ def test_a_patch_that_is_not_text_is_refused_and_a_half_saved_one_waited_for(tmp
     path.write_bytes(edit_bytes)
     session.poll()  # caught mid-save: nothing starts
     assert session.watchers[0].generation == 0
+
+
+def test_a_stopped_watcher_ends_and_reports_nothing_more(tmp_path: Path) -> None:
+    """Stop a watcher mid-render: its thread ends, the render is not reported, and nothing new starts."""
+    path = tmp_path / "snare.toml"
+    path.write_text("v0", encoding="utf-8")
+    rendering, release = threading.Event(), threading.Event()
+    reported: list[int] = []
+
+    def work(text: str) -> str:
+        rendering.set()
+        assert release.wait(5)
+        return text
+
+    def done(generation: int, _result: object, _elapsed: float, *, newest: bool) -> None:
+        reported.append(generation if newest else -generation)
+
+    w = audition.Watcher(path, work, done)
+    w.request("v1")
+    assert rendering.wait(5)
+    w.stop()
+    w.request("v2")  # ignored once stopped
+    release.set()
+    w.thread.join(5)
+    assert not w.thread.is_alive()
+    assert reported == []
+    idle = audition.Watcher(path, work, done)
+    idle.stop()  # with nothing pending
+    idle.thread.join(5)
+    assert not idle.thread.is_alive()
+
+
+def test_audition_stops_its_watchers_when_it_ends(example: Path) -> None:
+    """End every watcher's thread when audition stops."""
+
+    def watchers() -> set[threading.Thread]:
+        return {t for t in threading.enumerate() if t.name.endswith("(_run)")}
+
+    before = watchers()
+
+    class Stream:
+        def __init__(self, _rate: int, _channels: int, _fill: Callable[[int], Audio]) -> None:
+            pass
+
+        def __enter__(self) -> None:
+            raise KeyboardInterrupt
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    assert audition.audition([example, example], stream_factory=Stream, out=Collect([])) == 0
+    wait_for(lambda: watchers() <= before, 5)
