@@ -1094,3 +1094,72 @@ def test_a_brush_counts_in_the_length_and_takes_its_edits(example_dict: dict[str
     assert q.brush[0].band_hz == (900.0, 5310.0)  # the upper edge falls as a layer's
     assert q.brush[0].amp[1] == (32.956, 1.0)  # the rise lengthens by v^(−1/5), as a layer's
     assert (q.brush[0].sweep, q.brush[0].rattle) == (p.brush[0].sweep, p.brush[0].rattle)
+
+
+# Flams.
+
+GAP_MS = 25.0  # a flam's grace note leads by this
+
+
+def shape_curve(knots: patch.Knots) -> Callable[[np.ndarray], np.ndarray]:
+    """Return a shape's curve over times in ms."""
+    c = amplitude_curve([ms / 1000 for ms, _ in knots], [g for _, g in knots])
+    return lambda ms: c(ms / 1000)
+
+
+@pytest.mark.parametrize("name", ["tone", "crack", "fat", "driven", "clap", "snap"])
+def test_a_flam_is_the_grace_then_the_main_stroke(name: str) -> None:
+    """Find every shape the softer grace's, then from the main stroke's peak on the main stroke's, moved by the gap."""
+    p = loads(cli.reference_text(name))
+    q = patch.flam(p, GAP_MS)
+    grace = patch.softer(p, 12)
+    v = 10 ** (-12 / 20)
+    for path in (n for n in patch.curve_names(p) if n.endswith(".amp")):
+        main, joined, graced = (patch.curve_knots(x, path) for x in (p, q, grace))
+        start = main[0][0] + GAP_MS
+        # Before the main stroke: the grace's knots, at v times its gains.
+        before = [k for k in joined if k[0] < start]
+        assert [ms for ms, _ in before] == [ms for ms, _ in graced if ms <= start - 0.01]
+        np.testing.assert_allclose([g for _, g in before], [g * v for ms, g in graced if ms <= start - 0.01], atol=1e-6)
+        # At its start, the grace's value there.
+        at = next(g for ms, g in joined if ms == start)
+        assert at == pytest.approx(v * float(shape_curve(graced)(np.array([start]))[0]), abs=1e-5)  # knots to 1e-6
+        # From the main stroke's peak on, exactly the main stroke moved by the gap.
+        peak = next(ms for ms, g in main if g == 1.0)
+        ms = np.linspace(peak, main[-1][0] + 5, 401)
+        np.testing.assert_allclose(shape_curve(joined)(ms + GAP_MS), shape_curve(main)(ms), rtol=0, atol=1e-12)
+    # The pitch: the grace's glide, then the main stroke's from the body's peak.
+    peak = next(ms for ms, g in p.body.amp if g == 1.0)
+    assert q.body.pitch[-len(p.body.pitch) :] == tuple((ms + GAP_MS + peak, r) for ms, r in p.body.pitch)
+    assert q.body.pitch[0] == grace.body.pitch[0]
+    assert (q.body.tune_hz, q.noise[0].band_hz, q.drive, q.output) == (
+        p.body.tune_hz,
+        p.noise[0].band_hz,
+        p.drive,
+        p.output,
+    )
+
+
+def test_a_flam_of_rims_and_a_brush(example_dict: dict[str, Any]) -> None:
+    """Strike a rim and a brush twice too, the brush's sweep shared."""
+    p = from_dict(dict(example_dict, rim=[RIM], brush=[brush()]))
+    q = patch.flam(p, GAP_MS)
+    assert q.rim[0].amp[-1][0] == p.rim[0].amp[-1][0] + GAP_MS
+    assert q.brush[0].amp[-1][0] == p.brush[0].amp[-1][0] + GAP_MS
+    assert q.brush[0].sweep == p.brush[0].sweep
+
+
+def test_flam_failures() -> None:
+    """Refuse a gap or a grace that is not positive, and a flam that leaves the domain, naming the curve."""
+    p = loads(EXAMPLE)
+    for gap, grace, name in (
+        (0.0, 12.0, "--gap"),
+        (math.nan, 12.0, "--gap"),
+        (25.0, 0.0, "--grace"),
+        (25.0, -3.0, "--grace"),
+    ):
+        with pytest.raises(PatchError, match=name):
+            patch.flam(p, gap, grace)
+    assert any(m.startswith("noise[2].amp") for m in problems(patch.flam, p, 900.0))  # past the noise's 1 s
+    many = patch.bursts(p, "noise[1]", patch.Train(8, 5.0))
+    assert any(m.startswith("noise[1].amp: needs 3 to 32 knots") for m in problems(patch.flam, many, GAP_MS))

@@ -3,7 +3,7 @@
 
 """Command line (plan §7.6): halyard init | render | verify | extract | audition | pack.
 
-The editing commands, tune | stretch | bursts | softer, print a complete, canonical patch.
+The editing commands, tune | stretch | bursts | softer | flam, print a complete, canonical patch.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from . import __version__, wav
 from .audition import Settings, audition
 from .pack import Options, pack
-from .patch import Patch, PatchError, Train, bursts, dumps, load, loads, softer, stretch, tune
+from .patch import Patch, PatchError, Train, bursts, dumps, flam, load, loads, softer, stretch, tune
 from .reference import verify
 from .render import FORMATS, RenderError, db, export, render_takes
 
@@ -108,6 +108,11 @@ def cmd_bursts(args: argparse.Namespace) -> int:
 def cmd_softer(args: argparse.Namespace) -> int:
     """Print the same drum struck softer."""
     return _edit(args.patch, f"make it {args.db:g} dB softer", softer, args.db, args.glide, args.contact)
+
+
+def cmd_flam(args: argparse.Namespace) -> int:
+    """Print the drum struck twice, a grace note before the main stroke."""
+    return _edit(args.patch, f"write a flam {args.gap:g} ms wide", flam, args.gap, args.grace, args.glide, args.contact)
 
 
 def take_paths(out: str, takes: int) -> list[Path]:
@@ -287,6 +292,19 @@ def _edit_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> 
     p.add_argument("--glide", type=_finite, default=2.0, help="the glide's exponent (default 2; 0 turns it off)")
     p.add_argument("--contact", type=_finite, default=0.2, help="the contact exponent (default 0.2; 0 turns it off)")
     p.set_defaults(run=cmd_softer)
+
+    p = sub.add_parser("flam", help="print the drum struck twice: a softer grace note, then the main stroke")
+    p.add_argument("patch")
+    p.add_argument("--gap", type=_finite, required=True, metavar="MS", help="from the grace note to the main stroke")
+    p.add_argument("--grace", type=_finite, default=12.0, metavar="DB", help="how much softer the grace (default 12)")
+    p.add_argument("--glide", type=_finite, default=2.0, help="the grace's glide exponent, as softer's (default 2)")
+    p.add_argument(
+        "--contact",
+        type=_finite,
+        default=0.2,
+        help="the grace's contact exponent, as softer's (default 0.2)",
+    )
+    p.set_defaults(run=cmd_flam)
 
 
 def _play_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

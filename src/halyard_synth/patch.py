@@ -10,7 +10,7 @@ valid domain; the parser and the editing commands reject everything else and
 never clamp or repair. Problems name their fields by path, counting from 1:
 `noise[2].amp[3].ms` is the time of the third knot of the second layer.
 
-The editing commands (`tune`, `stretch`, `bursts`, `softer`) rewrite points and
+The editing commands (`tune`, `stretch`, `bursts`, `softer`, `flam`) rewrite points and
 never add a parameter. They compute on the decimal values as written, so the
 patch they print stays readable.
 """
@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+
+from .curve import amplitude_curve, pitch_curve
 
 if TYPE_CHECKING:
     import os
@@ -1195,3 +1197,44 @@ def softer(p: Patch, db: float, glide: float = 2.0, contact: float = 0.2) -> Pat
         rim=tuple(dataclasses.replace(r, level_db=level(r.level_db), amp=rises(r.amp)) for r in p.rim),
         brush=tuple(struck(brush) for brush in p.brush),
     )
+
+
+def flam(p: Patch, gap_ms: float, grace_db: float = 12.0, glide: float = 2.0, contact: float = 0.2) -> Patch:
+    """Return the drum struck twice: a grace note `grace_db` softer, then the main stroke `gap_ms` later.
+
+    The grace note is `softer(p, grace_db)` with its level in its shapes, so the
+    drive still sees it softer. Every shape is the grace's up to the main
+    stroke's first knot, moved `gap_ms` later, where it takes the grace's value
+    and goes on as the main stroke's. The pitch curve is the grace's up to
+    `gap_ms`, then the main stroke's, moved to start at the main body's peak,
+    since the glide follows the head's motion. Band edges and the brush's
+    sweep are shared; the grace's higher modes decay as its fundamental does,
+    the decay compressing from the main peak on. Times are written to 1 µs,
+    gains and ratios to 6 decimals.
+    """
+    for name, x, ok in (("--gap", gap_ms, gap_ms > 0), ("--grace", grace_db, grace_db > 0)):
+        if not (math.isfinite(x) and ok):
+            raise PatchError([f"{name}: must be a positive number, found {x!r}"])
+    grace = softer(p, grace_db, glide, contact)
+    v = Decimal(repr(10 ** (-grace_db / 20)))
+    gap = _dec(gap_ms)
+
+    def joined(path: str) -> Knots:
+        main = curve_knots(p, path)
+        knots = [(ms, float(round(_dec(g) * v, 6))) for ms, g in curve_knots(grace, path)]
+        start = _dec(main[0][0]) + gap
+        curve = amplitude_curve([ms / 1000 for ms, _ in knots], [g for _, g in knots])
+        residual = float(round(Decimal(repr(float(curve(float(start) / 1000)))), 6))
+        before = [k for k in knots if _dec(k[0]) <= start - MIN_SPACING_MS]
+        return (*before, (_ms(start), residual), *((_ms(_dec(ms) + gap), g) for ms, g in main[1:]))
+
+    peak = _dec(next(ms for ms, g in p.body.amp if g == 1.0))
+    played = grace.body.pitch
+    glided = pitch_curve([ms / 1000 for ms, _ in played], [r for _, r in played])
+    pitch = (
+        *(k for k in played if _dec(k[0]) <= gap - MIN_SPACING_MS),
+        (_ms(gap), float(round(Decimal(repr(float(glided(float(gap) / 1000)))), 6))),
+        *((_ms(_dec(ms) + gap + peak), r) for ms, r in p.body.pitch),
+    )
+    curves = {name: joined(name) for name in curve_names(p) if name.endswith(".amp")}
+    return _set_curves(p, {**curves, "body.pitch": pitch})

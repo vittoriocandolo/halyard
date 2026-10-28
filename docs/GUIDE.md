@@ -205,6 +205,15 @@ fail, and say why, rather than clamp.
   At 12 dB softer, a 1.08 glide becomes 1.005, a 0.05 ms rise 0.066 ms and a
   16 kHz edge 12.1 kHz. An exponent of 0 turns its rule off. `softer` by a then
   b equals `softer` by a + b up to the decimals it writes.
+- **`halyard flam PATCH --gap MS [--grace DB] [--glide P] [--contact P]`**
+  strikes the drum twice: a grace note `--grace` dB softer (default 12), by
+  `softer`'s rules, then the main stroke `--gap` ms later. Every shape is the
+  grace's until the main stroke starts, takes the grace's value there, and
+  goes on as the main stroke's; the glide restarts at the main body's peak.
+  The two strokes share their bands and a brush's sweep, and the grace's
+  higher modes decay with its fundamental. A flam of 15–40 ms suits most
+  tempos; it fails rather than drop knots when a shape would need more than
+  32 or run past its limit.
 
 ## Recipes
 
@@ -221,6 +230,7 @@ command; the test suite checks that each moves the sound the right way.
 | Darken | lower each layer's upper band edge (`band_hz[2]`) |
 | Add aggression | raise `drive.db` by 6 and lower `output.db` to taste. In a driven sound, the edge lives in the saturated source: raising the stick adds less than in a clean one. |
 | Make a ghost note | `halyard softer snare.toml 18` |
+| Play a flam | `halyard flam snare.toml --gap 25` |
 | Tighten a clap | `halyard stretch clap.toml all 0.7 --after 0`, or re-run `bursts` with a shorter `--spacing` |
 | Darken a clap | lower both edges of each layer's band |
 | Shorten or brighten a snap | `halyard stretch snap.toml all 0.6`; raise the burst's band and level |

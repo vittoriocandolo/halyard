@@ -43,6 +43,7 @@ halyard tune snare.toml F3                               # retune: modes, glide 
 halyard stretch snare.toml all 0.8                       # fit every shape to a tempo
 halyard bursts clap.toml 'noise[1]' --count 4 --spacing 11   # a clap train as ordinary knots
 halyard softer snare.toml 12 > snare-12.toml             # the same drum struck 12 dB softer
+halyard flam snare.toml --gap 25 > flam.toml             # a grace note 12 dB softer, 25 ms ahead
 halyard pack snare.toml snare-8.toml snare-16.toml snare-24.toml --takes 6 --out kit/
 ```
 
@@ -230,7 +231,7 @@ sample-replacement benchmark.
 
 | Module | Responsibility |
 |---|---|
-| `src/halyard_synth/patch.py` | schema, parsing, validation, canonical TOML; `tune`, `stretch`, `bursts`, `softer`; tuning helpers |
+| `src/halyard_synth/patch.py` | schema, parsing, validation, canonical TOML; `tune`, `stretch`, `bursts`, `softer`, `flam`; tuning helpers |
 | `src/halyard_synth/curve.py` | Hermite curves, PCHIP slopes, exact integrals, knot jumps, decay compression |
 | `src/halyard_synth/noise.py` | seeded noise, coherent layer tables (cached), values and slopes between samples, seeded dither |
 | `src/halyard_synth/voice.py` | modal body, noise layers with rattle, drive; knee slew at every drive, kink bound |

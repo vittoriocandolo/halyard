@@ -327,3 +327,19 @@ def test_the_package_runs_as_the_command(monkeypatch: pytest.MonkeyPatch, capsys
         runpy.run_module("halyard_synth", run_name="__main__")
     assert e.value.code == 0
     assert loads(capsys.readouterr().out) == loads(cli.reference_text("snap"))
+
+
+def test_flam(capsys: pytest.CaptureFixture[str], example: Path) -> None:
+    """Print the drum struck twice, and refuse a gap that is not positive."""
+    code, out, _ = run(capsys, "flam", example, "--gap", 25)
+    assert code == 0
+    assert loads(out).body.amp[-1][0] == loads(EXAMPLE).body.amp[-1][0] + FLAM_GAP_MS
+    code, out, _ = run(capsys, "flam", example, "--gap", 25, "--grace", 6, "--glide", 0, "--contact", 0)
+    assert code == 0
+    assert loads(out).noise[0].amp[1] == (0.05, round(10 ** (-6 / 20), 6))  # neither rise lengthened
+    code, _, err = run(capsys, "flam", example, "--gap", 0)
+    assert code == BAD_INPUT
+    assert "cannot write a flam 0 ms wide" in err
+
+
+FLAM_GAP_MS = 25.0
