@@ -4,6 +4,7 @@
 """The documentation tells the truth: generated parts current, links whole, examples as the code prints them."""
 
 import re
+import runpy
 import shlex
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from .conftest import EXAMPLE
 ROOT = Path(__file__).resolve().parent.parent
 PAGES = [ROOT / "README.md", ROOT / "CONTRIBUTING.md", ROOT / "CHANGELOG.md", *sorted((ROOT / "docs").glob("*.md"))]
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
+GUARD = 'if __name__ == "__main__":'
+PYTHON_EXAMPLES = 4  # in the user guide, at least
 QUICK_START = 10  # commands in the README's quick start, at least
 D3_HZ = 146.832
 REPORT = re.compile(r"```\n(tuning .*?)```", re.DOTALL)
@@ -129,4 +132,19 @@ def test_the_quick_start_runs(
         if out is not None:
             (tmp_path / out).write_text(printed, encoding="utf-8")
     assert loads((tmp_path / "snare.toml").read_text(encoding="utf-8")).body.tune_hz == D3_HZ  # as it says
+    assert any((tmp_path / "kit").glob("*.sfz"))
+
+
+def test_the_guides_python_examples_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the user guide's Python examples, in order, as a reader would save them."""
+    monkeypatch.chdir(tmp_path)
+    text = (ROOT / "docs" / "GUIDE.md").read_text(encoding="utf-8")
+    examples = re.findall(r"```python\n(.*?)```", text, re.DOTALL)
+    assert len(examples) >= PYTHON_EXAMPLES
+    # The examples that build on each other make one script; one with the main guard is a script of its own.
+    scripts = ["\n".join(e for e in examples if GUARD not in e), *(e for e in examples if GUARD in e)]
+    for i, code in enumerate(scripts):
+        script = tmp_path / f"example{i}.py"
+        script.write_text(code, encoding="utf-8")  # saved as a reader would
+        runpy.run_path(str(script), run_name="__main__")
     assert any((tmp_path / "kit").glob("*.sfz"))

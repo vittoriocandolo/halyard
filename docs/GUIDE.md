@@ -350,6 +350,73 @@ N takes (take j of a layer plays its seed + j − 1).
 Neighbouring layers more than 12 dB apart need a group volume above +6 dB,
 which some players cap; the pack report says so.
 
+## From Python
+
+Everything the commands do is a function of the package, `halyard_synth`.
+Patches are frozen dataclasses that check themselves when made, so an edit
+that leaves the valid domain raises `PatchError` with every problem's path,
+as the parser does. These examples run as a test, in order.
+
+```python
+from pathlib import Path
+
+from halyard_synth import patch, render
+from halyard_synth.cli import reference_text
+
+p = patch.loads(reference_text("rimshot"))  # or patch.load("snare.toml")
+audio, report = render.render(p)  # float32 at the patch's rate, and the report halyard render prints
+assert report.inside
+print(report)
+```
+
+The editing commands are functions from patch to patch, and `dumps` writes
+the canonical text they print:
+
+```python
+ghost = patch.softer(p, 18)  # the same drum struck 18 dB softer
+flammed = patch.flam(p, 25.0)  # a grace note 12 dB softer, 25 ms ahead
+lower = patch.tune(p, "D3")
+clap = patch.bursts(patch.loads(reference_text("clap")), "noise[1]", patch.Train(4, 11.0))
+Path("ghost.toml").write_text(patch.dumps(ghost), encoding="utf-8")
+assert patch.load("ghost.toml") == ghost
+```
+
+Takes, each written with its patch and provenance as `halyard render` writes
+them, and checked against the reference render as `halyard verify` does:
+
+```python
+from halyard_synth import reference
+
+audio, report = render.render_takes(p, 4)  # seeds 1-4, one gain for the set
+for a, take in zip(audio, report.takes, strict=True):
+    render.export(f"rimshot_rr{take.number}.wav", a, p, report, take)
+assert reference.verify(p, takes=2).passed
+```
+
+A pack, as `halyard pack` writes it, from patch files. It renders in worker
+processes, which start by importing your script, so a script that packs needs
+Python's usual guard, or every worker would pack again:
+
+```python
+from pathlib import Path
+
+from halyard_synth import pack, patch
+from halyard_synth.cli import reference_text
+
+
+def main() -> None:
+    p = patch.loads(reference_text("rimshot"))
+    names = []
+    for db in (0, 12, 24):
+        names.append(f"rimshot-{db}.toml")
+        Path(names[-1]).write_text(patch.dumps(patch.softer(p, db)), encoding="utf-8")
+    assert pack.pack(names, "kit", pack.Options(takes=2)) == 0
+
+
+if __name__ == "__main__":
+    main()
+```
+
 ## Outside the family
 
 Acoustic snares, whose sound depends on wire physics, shell, stick position

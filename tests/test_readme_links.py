@@ -25,7 +25,7 @@ def hook_module() -> ModuleType:
     return module
 
 
-def test_relative_links_become_the_repositorys() -> None:
+def test_relative_links_lead_to_the_repository() -> None:
     """Make pages link to the repository's view and images to the raw file, leaving absolute links and anchors."""
     hb = hook_module()
     text = "[guide](docs/GUIDE.md) ![fig](docs/figures/a.svg) [web](https://example.org) [here](#use)"
@@ -51,5 +51,5 @@ def test_the_package_readme_has_no_relative_link_left() -> None:
         assert target.startswith(("https://", "#")), target
         for prefix in (f"/blob/{branch}/", f"/{branch}/"):
             if target.startswith("https://") and prefix in target and "github" in target:
-                assert (ROOT / target.split(prefix, 1)[1]).exists(), target
+                assert (ROOT / target.split(prefix, 1)[1].partition("#")[0]).exists(), target
                 break

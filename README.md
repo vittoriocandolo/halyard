@@ -65,6 +65,9 @@ and every take of them is inside the validated domain with at least 16 dB of
 drive headroom. They are starting points: their names never select hidden
 algorithms.
 
+Every command is also a Python function; the guide's
+[From Python](docs/GUIDE.md#from-python) shows them, in examples a test runs.
+
 The editing commands print a complete, canonical patch and never add a
 parameter, so every change is visible and can be edited further. Knots,
 layers and modes are numbered from 1, as the parser's messages and the report
