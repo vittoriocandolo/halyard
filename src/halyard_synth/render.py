@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, override
 
 import numpy as np
 import scipy
-from scipy.signal import fftconvolve, upfirdn
+from scipy.signal import oaconvolve, upfirdn
 
 from . import __version__, cores, noise, wav
 from .loudness import momentary_max
@@ -234,7 +234,7 @@ def reconstructed_peak(y: Floats, taps: Floats) -> float:
     by the parabola through its two neighbours, is the true peak to within
     10⁻⁷ of it for anything below 20 kHz.
     """
-    z = fftconvolve(y, taps)
+    z = oaconvolve(y, taps)  # overlap-add: one long signal through a short filter
     i = int(np.argmax(np.abs(z), axis=None)) if z.size else 0
     if not 0 < i < z.size - 1:
         return float(np.abs(z[i])) if z.size else 0.0

@@ -213,9 +213,9 @@ spreads over more than 1 dB. GUIDE.md explains every line.
 ```
 uv run pytest                                    # the full suite (about a minute)
 uv run python -m tools.design_decimator --check
-uv run python -m tools.grid run --k 32           # the adversarial grid (about 10 minutes on 4 cores)
+uv run python -m tools.grid run --k 32           # the adversarial grid (about 3 minutes on 12 cores)
 uv run python -m tools.grid analyze docs/grid/k16.csv docs/grid/k32.csv
-uv run python -m tools.headroom run --dense      # the report's drive headroom against full renders (hours)
+uv run python -m tools.headroom run --dense      # the report's drive headroom against full renders (about 20 minutes on 12 cores)
 uv run python -m tools.headroom analyze docs/grid/headroom.csv
 uv run python -m tools.references                # the six references over seeds 1–16
 uv run python -m tools.bench                     # render time and memory on this machine

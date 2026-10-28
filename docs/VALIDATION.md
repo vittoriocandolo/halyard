@@ -9,6 +9,18 @@ recorded at the end.
 **Machine:** Intel Xeon @ 2.10 GHz, 4 cores, 15 GB, Linux.
 **Software:** Python 3.11.15, NumPy 2.4.6, SciPy 1.17.1.
 
+**Run again.** The 32× grid, the drive-headroom brute force and the references
+by measurement were run again on a Qualcomm Oryon, 12 cores, under WSL 2
+(Linux 6.18), with Python 3.15.0, NumPy 2.5.4 and SciPy 1.18.1, after the
+package was renamed, typed and given its exact true peak, and
+`docs/grid/k32.csv` and `docs/grid/headroom.csv` now hold those runs. Every
+figure below came out the same to the digit: no error changed by more than
+0.0009 dB (on one at −237 dB), no knee slew, kink bound or peak by more than
+10⁻¹² relatively, and the headroom comparison and the references' table are
+identical. Only the 512 × base check covers 96 fixtures instead of 90. The 32×
+grid took 0.56 CPU-hours, 3 minutes on the Oryon, and the brute force 92,524
+full renders.
+
 ## Numerical criteria (§8.1)
 
 Every criterion is a test in `tests/`. The *measured* column gives the value on
@@ -29,10 +41,11 @@ this machine.
 | Rendering accuracy | E_max and E_rel ≤ −100 dB for every fixture inside the validated domain | All 654 fixtures inside at 32× pass; the worst is −113.9 dB (below). |
 | Drive headroom | The report's value against full renders on every grid fixture; dense 0.05 dB scans on a subset | Never optimistic beyond the brute force's 0.00001 dB resolution, on 957 fixtures and 92,524 full renders; no change of status between the candidates in 169 dense scans (below). |
 | Loudness | EBU Tech 3341; K-weighting against BS.1770's 48 kHz table | The 48 kHz coefficients match to 8.9·10⁻¹⁶, the other rates match its response within 0.03 dB. The −23 dBFS 1 kHz sine reads −22.99 to −23.01 LUFS at all four rates. |
+| True peak | The crest of the output's band-limited reconstruction, within 10⁻⁷; a true-peak target reached exactly | Against the reconstruction evaluated directly a thousandth of an internal sample apart, Hann-shaped sines at 1, 12 and 19.9 kHz in any phase read within 7.6·10⁻⁸ (on the Oryon). `true-peak` mode puts the true peak at its target to 10⁻⁹ dB. |
 | Export | Independent readers; takes carry their seed, gains and patch; PCM reads back exactly; TPDF dither; never full scale | soundfile, `scipy.io.wavfile`, Python's `wave` and an independent chunk walker read identical samples and headers. Each take's `snar` chunk holds its own patch (its seed) and its gains, and its samples follow from them. `smpl` is left out when the body is silent. The dither is triangular (KS), bit-identical per seed and prefix-stable, keeps exact zeros, and leaves an error power of 1/4 LSB² at every offset between steps. |
 | Packs | The SFZ mapping, parsed back | Every velocity 1–127 and every take maps to exactly one existing file. The level, measured from the files, follows 40·log₁₀(v/127) within 0.01 dB, and steps between neighbouring velocities never exceed one velocity step. A pack re-renders byte-identically. |
 | Takes | Seeds 1–8 of each reference: one gain per set; loudness spread ≤ 1 dB | One gain per set; spreads 0.15–0.77 dB (below). |
-| Performance | 0.5 s hit with three layers ≤ 300 ms at any rate; 2 s ≤ 1.5 s; 32-file pack ≤ 15 s; ≤ 300 MB | 186–234 ms with new noise tables, 130–162 ms cached; 467–550 ms; 1.3 s; at most 222 MiB (below). |
+| Performance | 0.5 s hit with three layers ≤ 300 ms at any rate; 2 s ≤ 1.5 s; 32-file pack ≤ 15 s; ≤ 300 MB | 186–234 ms with new noise tables, 130–162 ms cached; 467–550 ms; 1.3 s; at most 222 MiB (below). On the Oryon: 117–152 ms, 87–118 ms cached; 317–370 ms; 1.4 s; at most 275 MiB. |
 
 ### Decimators
 
@@ -249,11 +262,35 @@ the first.
 
 Where the time goes, for the example patch at 88.2 kHz (260 ms, two layers,
 tables cached): synthesis 32 ms, decimation 27 ms, the kink terms 4 ms, the
-probes 9 ms, the drive-headroom search 19 ms, loudness 6 ms and the true peak
-2 ms. Keeping the probes' saturator input once over the union of their
+probes 9 ms, the drive-headroom search 19 ms, loudness 6 ms and the true peak,
+then a 4× estimate, 2 ms. Keeping the probes' saturator input once over the union of their
 windows, which overlap almost entirely, took the headroom search from 46 to
 19 ms. A new seed adds its tables, computed in parallel, one transform each:
 about 25 ms each when warm.
+
+On the Oryon (12 cores, WSL 2, Python 3.15, NumPy 2.5.4, SciPy 1.18.1), with
+the exact true peak and the pack's workers sharing the cores:
+
+| Sound | Rate | New seed | Cached | Budget | Memory above baseline |
+|---|---|---|---|---|---|
+| 0.5 s hit, three layers | 44.1 kHz | 123 ms | 100 ms | 300 ms | 192 MiB |
+| | 48 kHz | 117 ms | 87 ms | 300 ms | 232 MiB |
+| | 88.2 kHz | 152 ms | 118 ms | 300 ms | 249 MiB |
+| | 96 kHz | 142 ms | 101 ms | 300 ms | 257 MiB |
+| 2 s body, 1 s of noise | 44.1 kHz | 317 ms | 291 ms | 1.5 s | 207 MiB |
+| | 48 kHz | 319 ms | 286 ms | 1.5 s | 275 MiB |
+| | 88.2 kHz | 370 ms | 342 ms | 1.5 s | 193 MiB |
+| | 96 kHz | 353 ms | 332 ms | 1.5 s | 260 MiB |
+| Pack: 4 layers × 8 takes, 32 files | 48 kHz | 1.4 s | | 15 s | (worker processes) |
+
+The exact true peak convolves the internal signal with the decimator once.
+The table was measured with an FFT convolution, which added 10–50 ms to these
+renders; it is now an overlap-add convolution, the same to 7·10⁻¹⁶ and
+measured at 7.0 against 11.3 ms on the example patch at 88.2 kHz, so the
+table bounds the times from above. The whole true peak of that patch takes
+9.5 ms. Each of a pack's workers used to compute its tables and
+decimate with a thread per core; sharing the cores among them took a pack of
+four layers of `fat` with 16 takes from 1.47–1.66 s to 1.37–1.40 s.
 
 ## Listening
 

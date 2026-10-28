@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from halyard_synth import cores
 from halyard_synth.patch import from_dict
 from halyard_synth.render import DRIVE_MAX, HEADROOM_STEP_DB, domain, drives_of, render, synthesize
 from tools import grid, say
@@ -142,7 +143,10 @@ def run(args: argparse.Namespace) -> None:
     say(f"{len(jobs)} fixtures to run ({len(done)} already in {out})")
     start = time.perf_counter()
     fresh = not out.exists()
-    with Path(out).open("a", newline="", encoding="utf-8") as f, ProcessPoolExecutor(max_workers=args.workers) as pool:
+    with (
+        Path(out).open("a", newline="", encoding="utf-8") as f,
+        ProcessPoolExecutor(max_workers=args.workers, initializer=cores.share, initargs=(args.workers,)) as pool,
+    ):
         w = csv.DictWriter(f, FIELDS)
         if fresh:
             w.writeheader()

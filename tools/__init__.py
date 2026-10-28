@@ -9,3 +9,4 @@ import sys
 def say(text: str) -> None:
     """Write a line of a tool's report."""
     sys.stdout.write(f"{text}\n")
+    sys.stdout.flush()  # a long run's progress shows as it happens, in a log too
