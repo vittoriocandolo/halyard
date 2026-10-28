@@ -72,8 +72,12 @@ supports, and the tests again with the oldest supported NumPy and SciPy.
 
 The decimators ship as data in `src/halyard_synth/data`, checked by SHA-256.
 `uv run python -m tools.design_decimator --check` designs them again with the
-current NumPy and SciPy and compares the designs with what ships. Without
-`--check` it replaces the shipped data, which changes every render.
+current NumPy and SciPy and checks that each design is the shipped filter: the
+same length, and the same passband and stopband to 10⁻⁴ dB. The taps
+themselves differ by up to about 10⁻⁹ between platforms and library versions,
+since the minimum-phase method takes the logarithm of a spectrum 116 dB down;
+the shipped data, not a fresh design, is what renders use. Without `--check`
+it replaces the shipped data, which changes every render.
 
 ## Releasing
 

@@ -210,15 +210,15 @@ spreads over more than 1 dB. GUIDE.md explains every line.
 ## Development
 
 ```
-python -m pytest                          # the full suite (a few minutes)
-python tools/design_decimator.py --check
-python tools/grid.py run --k 32           # the adversarial grid (about 10 minutes on 4 cores)
-python tools/grid.py analyze docs/grid/k16.csv docs/grid/k32.csv
-python tools/headroom.py run --dense      # the report's drive headroom against full renders (hours)
-python tools/headroom.py analyze docs/grid/headroom.csv
-python tools/references.py                # the six references over seeds 1–16
-python tools/bench.py                     # render time and memory on this machine
-python tools/golden.py                    # regenerate golden renders (a deliberate sound change only)
+uv run pytest                                    # the full suite (about a minute)
+uv run python -m tools.design_decimator --check
+uv run python -m tools.grid run --k 32           # the adversarial grid (about 10 minutes on 4 cores)
+uv run python -m tools.grid analyze docs/grid/k16.csv docs/grid/k32.csv
+uv run python -m tools.headroom run --dense      # the report's drive headroom against full renders (hours)
+uv run python -m tools.headroom analyze docs/grid/headroom.csv
+uv run python -m tools.references                # the six references over seeds 1–16
+uv run python -m tools.bench                     # render time and memory on this machine
+uv run python -m tools.golden                    # regenerate golden renders (a deliberate sound change only)
 ```
 
 [docs/VALIDATION.md](docs/VALIDATION.md) records every numerical criterion of

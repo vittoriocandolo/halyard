@@ -42,6 +42,16 @@ checksums: a Kaiser-window linear-phase prototype at 116 dB, converted with
 renormalized so the exactly rounded sum of the taps is 1. The 16× and 64×
 designs ship for the grid; the renderer uses 32×.
 
+Designing them again (`uv run python -m tools.design_decimator --check`) gives
+the same filters, not the same bits. On an Oryon laptop under NumPy 2.5.4 and
+SciPy 1.18.1 every design has the shipped length, passband and stopband to
+1.1·10⁻⁶ dB, and its response lies 131–176 dB from the shipped one's, below
+every stopband; the taps differ by up to 9.8·10⁻¹⁰. Under the shipped designs'
+own NumPy 2.4.6 and SciPy 1.17.1 on that machine they differ by up to
+1.4·10⁻¹¹: the homomorphic method takes the logarithm of a spectrum 116 dB
+down, which amplifies the FFTs' platform rounding. Renders load the shipped
+taps, checked by SHA-256, and never a fresh design.
+
 | Family and rate | Taps | Length | 99% of energy within | Passband deviation | Stopband |
 |---|---|---|---|---|---|
 | 44.1 kHz, 16× | 2,593 | 3.67 ms | 0.85 ms | 1.7·10⁻⁵ dB | 115.7 dB |

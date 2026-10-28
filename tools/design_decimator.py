@@ -9,6 +9,13 @@ their SHA-256. Run this only to change the rendering policy.
     uv run python -m tools.design_decimator            # write the shipped designs
     uv run python -m tools.design_decimator --check    # compare a fresh design with the shipped data
 
+The homomorphic method takes the logarithm of a spectrum that reaches 116 dB
+down, so the rounding of its FFTs, which differs between platforms and library
+versions, moves the taps by up to about 10⁻⁹: a fresh design is the same
+filter, not the same bits. The check compares what a filter is: its length,
+and its passband and stopband to 10⁻⁴ dB, and reports how far apart the two
+frequency responses lie.
+
 Design: a Kaiser-window linear-phase prototype at 116 dB, converted to minimum
 phase by SciPy's full-length, magnitude-matching homomorphic method with a
 2^20-point FFT, then renormalized so that the taps sum to exactly 1. The
@@ -43,7 +50,9 @@ ATTENUATION_DB = 116.0
 N_FFT = 2**20
 BASES = (44100, 48000)
 SHIPPED_K = (16, 32, 64)
-AGREE = 1e-12  # how close a fresh design must come to the shipped one
+SPEC_DB = (
+    1e-4  # a fresh design's passband and stopband agree with the shipped one's to this, ten times finer than stated
+)
 DATA = Path(__file__).resolve().parent.parent / "src" / "halyard_synth" / "data"
 
 
@@ -89,6 +98,20 @@ def checksum(h: Floats) -> str:
     return hashlib.sha256(np.asarray(h, dtype="<f8").tobytes()).hexdigest()
 
 
+def check(fresh: Floats, shipped: Floats, base: int, k: int) -> int:
+    """Compare a fresh design with the shipped one, and return 1 unless they are the same filter."""
+    if fresh.size != shipped.size:
+        say(f"  shipped vs fresh design: {shipped.size} taps against {fresh.size}")
+        return 1
+    a, b = measure(fresh, base, k), measure(shipped, base, k)
+    spec = max(abs(a["passband_db"] - b["passband_db"]), abs(a["stopband_db"] - b["stopband_db"]))
+    apart = 20 * math.log10(max(float(np.max(np.abs(np.fft.rfft(fresh - shipped, 2**22)))), 1e-300))
+    taps = float(np.max(np.abs(fresh - shipped)))
+    say(f"  shipped vs fresh design: specifications within {spec:.1e} dB, responses {apart:.1f} dB apart")
+    say(f"  taps up to {taps:.1e} apart")
+    return int(spec > SPEC_DB)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Design every shipped decimator, and write it, or with --check compare it with the shipped one."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -127,10 +150,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"passband {entry['passband_db']:.1e} dB, stopband {entry['stopband_db']:.1f} dB",
             )
             if args.check:
-                shipped = np.fromfile(DATA / entry["file"], dtype="<f8")
-                diff = np.max(np.abs(shipped - h)) if shipped.size == h.size else math.inf
-                say(f"  shipped vs fresh design: max difference {diff:.1e}")
-                status |= int(diff > AGREE)
+                status |= check(h, np.fromfile(DATA / entry["file"], dtype="<f8"), base, k)
             else:
                 h.astype("<f8").tofile(DATA / entry["file"])
     if not args.check:
