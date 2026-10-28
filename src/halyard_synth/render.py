@@ -36,7 +36,7 @@ from scipy.signal import oaconvolve, upfirdn
 
 from . import __version__, cores, noise, wav
 from .loudness import momentary_max
-from .patch import MAX_SEED, Patch, describe_tuning, dumps
+from .patch import MAX_SEED, Patch, curve_knots, describe_tuning, dumps
 from .voice import (
     Kinks,
     Slew,
@@ -405,13 +405,7 @@ class Cause:
 def knot_ms(p: Patch, path: str) -> float:
     """Return the time of a knot named by its path, such as "noise[2].amp[3]", as the patch writes it."""
     curve, index = path[: path.rindex("[")], int(path[path.rindex("[") + 1 : -1])
-    if curve == "body.amp":
-        knots = p.body.amp
-    elif curve == "body.pitch":
-        knots = p.body.pitch
-    else:
-        knots = p.noise[int(curve[len("noise[") : curve.index("]")]) - 1].amp
-    time: float = knots[index - 1][0]
+    time: float = curve_knots(p, curve)[index - 1][0]
     return time
 
 

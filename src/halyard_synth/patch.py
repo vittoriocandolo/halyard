@@ -822,8 +822,8 @@ def curve_names(p: Patch) -> tuple[str, ...]:
     return ("body.pitch", "body.amp", *noise, *(f"rim[{j}].amp" for j in range(1, len(p.rim) + 1)))
 
 
-def _get_curve(p: Patch, name: str) -> Knots:
-    """Return a curve's knots by its path."""
+def curve_knots(p: Patch, name: str) -> Knots:
+    """Return a curve's knots by its path, one of `curve_names(p)`."""
     if name == "body.pitch":
         return p.body.pitch
     if name == "body.amp":
@@ -880,7 +880,7 @@ def stretch(p: Patch, curves: str | Iterable[str], factor: float, after_ms: floa
             raise PatchError([f"{name}: not a curve of this patch; expected all or one of {', '.join(curve_names(p))}"])
     out: dict[str, Knots] = {}
     for name in dict.fromkeys(names):
-        knots = _get_curve(p, name)
+        knots = curve_knots(p, name)
         if after_ms is not None:
             anchor = after_ms
         else:

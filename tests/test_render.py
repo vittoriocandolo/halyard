@@ -402,12 +402,20 @@ def test_the_cause_names_what_to_change() -> None:
     assert "lower drive.db to" in str(hot)
 
 
+RIM_RISE_MS = 0.01  # a rim struck this fast
+
+
 def test_knot_times_by_path() -> None:
     """Find a knot's time by its path, as the patch writes it."""
     p = loads(EXAMPLE)
     assert render.knot_ms(p, "body.amp[2]") == STICK_MS
     assert render.knot_ms(p, "body.pitch[2]") == PITCH_MS
     assert render.knot_ms(p, "noise[2].amp[5]") == WIRES_MS
+    rim = {"level_db": 0.0, "damping": 1.0, "modes": [{"hz": 9000.0, "level_db": 0.0}]}
+    struck = make(rim=[dict(rim, amp=[{"ms": m, "gain": g} for m, g in ((0, 0), (0.01, 1), (3, 0))])])
+    assert render.knot_ms(struck, "rim[1].amp[2]") == RIM_RISE_MS
+    # A rim struck in 10 µs leads the kinks, and the report names its knot.
+    assert render.render(struck)[1].takes[0].cause.knot == "rim[1].amp[2]"
 
 
 # Takes.
