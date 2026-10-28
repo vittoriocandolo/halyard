@@ -5,17 +5,17 @@ seed = 1
 [body]
 tune_hz  = 233.0
 level_db = -4.0
-damping  = 1.2
-modes = [
+damping  = 1.2              # mode i decays ratio^damping times faster
+modes = [                   # loudest mode exactly 0 dB
   { ratio = 1.0,   level_db = 0.0 },
   { ratio = 1.593, level_db = -5.0 },
   { ratio = 2.136, level_db = -10.0 },
 ]
-pitch = [
+pitch = [                   # ratio to tune_hz; starts at 0 ms, ends at 1
   { ms = 0.0, ratio = 1.15 },
   { ms = 6.0, ratio = 1.0 },
 ]
-amp = [
+amp = [                     # shape: 0 at both ends, highest point exactly 1
   { ms = 0.0,   gain = 0.0 },
   { ms = 0.25,  gain = 1.0 },
   { ms = 12.0,  gain = 0.45 },
@@ -23,10 +23,10 @@ amp = [
   { ms = 110.0, gain = 0.0 },
 ]
 
-[[noise]]
+[[noise]]                   # noise[1]
 level_db = -8.0
 band_hz  = [1500.0, 18000.0]
-rattle   = 0.0
+rattle   = 0.0              # 0 … 1, gated at the body's fundamental
 amp = [
   { ms = 0.0,  gain = 0.0 },
   { ms = 0.03, gain = 1.0 },
@@ -35,10 +35,10 @@ amp = [
   { ms = 5.0,  gain = 0.0 },
 ]
 
-[[noise]]
+[[noise]]                   # noise[2]
 level_db = -7.0
 band_hz  = [3000.0, 12000.0]
-rattle   = 0.35
+rattle   = 0.35             # 0 … 1, gated at the body's fundamental
 amp = [
   { ms = 0.0,   gain = 0.0 },
   { ms = 0.8,   gain = 1.0 },
@@ -48,11 +48,11 @@ amp = [
 ]
 
 [drive]
-db = 4.0
+db = 4.0                    # small-signal gain; 0 = bypass
 
 [output]
 sample_rate = 48000
-format      = "float32"
-mode        = "gain"
-db          = -9.6
+format      = "float32"     # "float32" | "pcm24" | "pcm16"
+mode        = "gain"        # "gain" | "peak" | "true-peak"
+db          = -9.6          # gain in dB, or peak target in dBFS
 polarity    = 1

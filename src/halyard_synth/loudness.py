@@ -21,7 +21,7 @@ import math
 from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.signal import resample_poly, sosfilt
+from scipy.signal import sosfilt
 
 if TYPE_CHECKING:
     from numpy.typing import ArrayLike, NDArray
@@ -67,9 +67,3 @@ def momentary_max(x: ArrayLike, rate: int) -> float:
     energy = np.concatenate(([0.0], np.cumsum(z * z)))
     ms = float(np.max(energy[w:] - energy[:-w])) / w
     return OFFSET + 10.0 * math.log10(ms) if ms > 0 else -math.inf
-
-
-def true_peak(audio: ArrayLike) -> float:
-    """Return a 4× oversampled peak estimate (information only)."""
-    x = np.concatenate((np.asarray(audio, dtype=float), np.zeros(32)))
-    return max(float(np.max(np.abs(resample_poly(x, 4, 1)))), float(np.max(np.abs(audio), initial=0.0)))

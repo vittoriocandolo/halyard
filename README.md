@@ -121,7 +121,7 @@ db = 6.0                    # small-signal gain; 0 = bypass
 [output]
 sample_rate = 48000
 format      = "float32"     # "float32" | "pcm24" | "pcm16"
-mode        = "gain"        # "gain" | "peak"
+mode        = "gain"        # "gain" | "peak" | "true-peak"
 db          = -6.0          # gain in dB, or peak target in dBFS
 polarity    = 1
 ```
@@ -158,7 +158,7 @@ The valid domain:
 | knots per curve | pitch 2 – 32, amplitude 3 – 32 |
 | knot spacing | ≥ 10 µs (compared on the decimal values as written) |
 | body curves / noise curves | end by 2 s / by 1 s |
-| output | 44.1, 48, 88.2 or 96 kHz; float32, pcm24 or pcm16; gain −60 – +24 dB; peak target −60 – 0 dBFS |
+| output | 44.1, 48, 88.2 or 96 kHz; float32, pcm24 or pcm16; gain −60 – +24 dB; sample or true peak target −60 – 0 dBFS |
 | `seed` | 0 – 2⁶³ − 1, takes included |
 
 ## What a render reports
@@ -166,11 +166,11 @@ The valid domain:
 ```
 tuning   185.000 Hz, F#3 +0.0 cents; modes 185.0, 294.7, 395.2 Hz
 length   260.0 ms source, 261.9 ms exported (12571 samples at 48000 Hz, float32), seed 1
-peak     -4.05 dBFS sample, -3.74 dBTP true (4× estimate, information only)
+peak     -4.05 dBFS sample, -3.72 dBTP true
 loudness -19.0 LUFS, the largest 400 ms momentary loudness (BS.1770)
 domain   inside the validated domain: predicted aliasing -137 dB, margin 37.0 dB
-         mostly kinks, 64% at noise[1].amp[2] (0.05 ms); drive headroom +20.6 dB
-render   99 ms
+         mostly kinks, 64% at noise[1].amp[2] (0.05 ms); drive headroom +21.6 dB
+render   86 ms
 ```
 
 The domain line is the renderer's own prediction of its aliasing error,
@@ -198,8 +198,9 @@ spreads over more than 1 dB. GUIDE.md explains every line.
   samples. The noise tables of a render's layers are computed in parallel and
   cached; decimation runs in parallel chunks that are bit-identical to one
   `upfirdn` call.
-- **Output.** One gain for the whole set (the output gain, or in peak mode
-  the gain that brings the loudest take to the target), then polarity, then
+- **Output.** One gain for the whole set (the output gain, or in peak or
+  true-peak mode the gain that brings the loudest take's sample or true peak
+  to the target), then polarity, then
   one conversion to float32, or one quantization to PCM with seeded TPDF
   dither that leaves exact zeros alone.
 - **File.** `fmt`, `fact` (float), `smpl` with the root key (left out when
@@ -234,7 +235,7 @@ sample-replacement benchmark.
 | `src/halyard_synth/noise.py` | seeded noise, coherent layer tables (cached), values and slopes between samples, seeded dither |
 | `src/halyard_synth/voice.py` | modal body, noise layers with rattle, drive; knee slew at every drive, kink bound |
 | `src/halyard_synth/render.py` | rates, frozen decimators, parallel decimation, domain rule and drive headroom, takes, report, export |
-| `src/halyard_synth/loudness.py` | BS.1770 K-weighting at every rate, momentary loudness, true peak |
+| `src/halyard_synth/loudness.py` | BS.1770 K-weighting at every rate, momentary loudness |
 | `src/halyard_synth/pack.py` | velocity layers, takes, one gain per pack, the SFZ mapping |
 | `src/halyard_synth/reference.py` | the reference renderer and comparison behind `halyard verify` |
 | `src/halyard_synth/wav.py` | RIFF writing and reading, float and PCM |

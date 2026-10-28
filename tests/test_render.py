@@ -8,10 +8,11 @@ import math
 
 import numpy as np
 import pytest
-from scipy.signal.windows import tukey
+from numpy.typing import NDArray
+from scipy.signal import fftconvolve
 
 from halyard_synth import cli, render, voice
-from halyard_synth.loudness import momentary_max, true_peak
+from halyard_synth.loudness import momentary_max
 from halyard_synth.patch import loads
 
 from .conftest import EXAMPLE, make
@@ -27,7 +28,7 @@ MATCHED_DB = 0.01  # level matching brings the takes within this
 TAKES = 4
 STICK_MS = 0.4  # the body's peak, its pitch's end and the wires' end in the example
 PITCH_MS = 15.0
-TRUE_PEAK = 0.01  # the true peak of a sine between samples, relatively
+PARABOLA = 1e-7  # the parabola finds the reconstruction's crest between internal samples to this, relatively
 FLOOR = 1e-7  # the absolute bound of near-silent renders
 BISECTION = 1e-5  # the headroom's edge is refined to this, relatively in α
 
@@ -191,6 +192,7 @@ def test_domain_rule() -> None:
             kink,
             1.0,
             24000.0,
+            peak,
         )
 
     # A linear path with no kinks predicts nothing.
@@ -209,12 +211,51 @@ def test_domain_rule() -> None:
     assert render.allowed(0.0099) == FLOOR
 
 
-def test_true_peak_catches_intersample_peaks() -> None:
-    """Find the true peak of a sine at a quarter of the rate, whose samples miss its crests by 3 dB."""
-    n = np.arange(4800)
-    x = (0.5 * tukey(n.size, 0.2) * np.sin(2 * np.pi * 12000 / 48000 * n + np.pi / 4)).astype(np.float32)
-    assert np.max(np.abs(x)) == pytest.approx(0.5 * math.sqrt(0.5), rel=1e-6)
-    assert true_peak(x) == pytest.approx(0.5, rel=TRUE_PEAK)
+@pytest.mark.parametrize("hz", [1000.0, 12000.0, 19900.0])
+def test_the_true_peak_is_the_reconstruction_s_crest(hz: float) -> None:
+    """Find the true peak the crest of the output's reconstruction, evaluated directly between internal samples."""
+    taps = render.decimator(48000).taps
+    n = INTERNAL // 20
+    length = n / INTERNAL
+
+    def y(t: NDArray[np.float64], phase: float) -> NDArray[np.float64]:
+        """Return a Hann-shaped sine at times t, a pure function of time as the internal signal is."""
+        inside = (t >= 0) & (t < length)
+        out: NDArray[np.float64] = np.where(inside, 0.25 * (1 - np.cos(2 * np.pi * t / length)), 0.0)
+        return out * np.sin(2 * np.pi * hz * t + phase)
+
+    k = np.arange(taps.size)
+    for phase in (0.0, 1.0, 2.5):
+        x = y(np.arange(n) / INTERNAL, phase)
+        true = render.reconstructed_peak(x, taps)
+        crest = int(np.argmax(np.abs(fftconvolve(x, taps))))
+        between = np.linspace(-1, 1, 2001)  # a thousandth of an internal sample apart
+        dense = max(abs(float(np.sum(taps * y((crest + u - k) / INTERNAL, phase)))) for u in between)
+        assert true == pytest.approx(dense, rel=PARABOLA)
+        assert true >= np.max(np.abs(render.decimate(taps, x, FACTOR))) * (1 - 1e-12)
+
+
+def test_the_true_peak_of_edge_cases() -> None:
+    """Find the true peak of nothing, of silence, of a crest at the very end, and of a flat top."""
+    one = np.ones(1)
+    assert render.reconstructed_peak(np.zeros(0), one) == 0.0
+    assert render.reconstructed_peak(np.zeros(3), one) == 0.0
+    assert render.reconstructed_peak(np.array([0.0, -0.5]), one) == 1 / 2  # a crest at the very end
+    assert render.reconstructed_peak(np.ones(3), one) == 1.0  # flat: no parabola
+
+
+def test_true_peak_mode_brings_the_true_peak_to_its_target() -> None:
+    """Bring the true peak, not the sample peak, to the target, in a render and in a pack."""
+    p = make(**{"output.mode": "true-peak", "output.db": -1.0, "drive.db": 12.0})
+    audio, report = render.render(p)
+    take = report.takes[0]
+    assert 20 * math.log10(take.true_peak) == pytest.approx(-1.0, abs=1e-9)
+    assert take.peak <= take.true_peak
+    sample = render.render(make(**{"output.mode": "peak", "output.db": -1.0, "drive.db": 12.0}))[1].takes[0]
+    assert 20 * math.log10(sample.peak) == pytest.approx(-1.0, abs=PEAK_DB)
+    assert sample.true_peak >= sample.peak
+    assert "dBTP true" in str(report)
+    assert float(np.max(np.abs(audio))) == take.peak
 
 
 # One render knows the rule at every drive.
@@ -270,7 +311,19 @@ def test_drive_headroom_never_skips_an_outside_island() -> None:
     alpha = voice.drive_alpha(12.0)
 
     def at(a: float) -> render.Synthesis:
-        return render.Synthesis(np.array([1.0]), 1536000, 32, 1, voice.Slew(0.1, knees), kinks, 0.0, a, 24000.0, probes)
+        return render.Synthesis(
+            np.array([1.0]),
+            1536000,
+            32,
+            1,
+            voice.Slew(0.1, knees),
+            kinks,
+            0.0,
+            a,
+            24000.0,
+            1.0,
+            probes,
+        )
 
     threshold = math.pi**2 / math.log(render.SATURATION / render.LIMIT)
     island = threshold / 0.1

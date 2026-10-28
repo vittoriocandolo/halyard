@@ -106,14 +106,17 @@ drive**: a layer at −6 dB with 24 dB of drive saturates like one at 0 dB with
 |---|---|---|
 | `sample_rate` | 44100, 48000, 88200, 96000 | The file's rate. The 96 kHz file is exactly the 48 kHz one with samples filled in. |
 | `format` | `float32`, `pcm24`, `pcm16` | PCM uses the plain PCM tag that hardware samplers read, with seeded triangular dither that leaves exact zeros alone. |
-| `mode` | `gain`, `peak` | Apply `db` as a gain, or scale so the peak is at `db` dBFS. |
+| `mode` | `gain`, `peak`, `true-peak` | Apply `db` as a gain, or scale so the sample peak, or the true peak, is at `db` dBFS. |
 | `db` | gain −60 – +24; peak −60 – 0 | See `mode`. |
 | `polarity` | 1, −1 | Inverts the output. |
 
 A gain-mode render over full scale is refused, with the reduction it needs;
 `--allow-over` writes it anyway as a float file. Nothing is ever clipped. A
 PCM render must peak 2 LSB below full scale so the dither never clips; peak
-mode lowers its target by those 2 LSB.
+mode lowers its target by those 2 LSB. The true peak is the largest value of
+the file's band-limited reconstruction, the level a converter reaches between
+the samples, measured exactly from the render; use `true-peak` when a
+limiter or a streaming target counts in dBTP.
 
 ### Seed and takes
 
@@ -189,11 +192,11 @@ silent body can still gate a layer: a buzz at a pitch with no tone of its own.
 ```
 tuning   185.000 Hz, F#3 +0.0 cents; modes 185.0, 294.7, 395.2 Hz
 length   260.0 ms source, 261.9 ms exported (12571 samples at 48000 Hz, float32), seed 1
-peak     -4.05 dBFS sample, -3.74 dBTP true (4× estimate, information only)
+peak     -4.05 dBFS sample, -3.72 dBTP true
 loudness -19.0 LUFS, the largest 400 ms momentary loudness (BS.1770)
 domain   inside the validated domain: predicted aliasing -137 dB, margin 37.0 dB
-         mostly kinks, 64% at noise[1].amp[2] (0.05 ms); drive headroom +20.6 dB
-render   99 ms
+         mostly kinks, 64% at noise[1].amp[2] (0.05 ms); drive headroom +21.6 dB
+render   86 ms
 ```
 
 - **tuning** is `tune_hz` as a note and cents, and each mode's settled

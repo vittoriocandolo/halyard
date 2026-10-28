@@ -5,19 +5,19 @@ seed = 1
 [body]
 tune_hz  = 165.0
 level_db = -2.0
-damping  = 0.8
-modes = [
+damping  = 0.8              # mode i decays ratio^damping times faster
+modes = [                   # loudest mode exactly 0 dB
   { ratio = 1.0,   level_db = 0.0 },
   { ratio = 1.593, level_db = -4.0 },
   { ratio = 2.136, level_db = -9.0 },
   { ratio = 2.295, level_db = -12.0 },
 ]
-pitch = [
+pitch = [                   # ratio to tune_hz; starts at 0 ms, ends at 1
   { ms = 0.0,  ratio = 1.1 },
   { ms = 4.0,  ratio = 1.03 },
   { ms = 25.0, ratio = 1.0 },
 ]
-amp = [
+amp = [                     # shape: 0 at both ends, highest point exactly 1
   { ms = 0.0,   gain = 0.0 },
   { ms = 0.5,   gain = 1.0 },
   { ms = 30.0,  gain = 0.6 },
@@ -26,10 +26,10 @@ amp = [
   { ms = 380.0, gain = 0.0 },
 ]
 
-[[noise]]
+[[noise]]                   # noise[1]
 level_db = -12.0
 band_hz  = [1200.0, 14000.0]
-rattle   = 0.0
+rattle   = 0.0              # 0 … 1, gated at the body's fundamental
 amp = [
   { ms = 0.0,  gain = 0.0 },
   { ms = 0.05, gain = 1.0 },
@@ -38,10 +38,10 @@ amp = [
   { ms = 8.0,  gain = 0.0 },
 ]
 
-[[noise]]
+[[noise]]                   # noise[2]
 level_db = -8.0
 band_hz  = [3500.0, 13000.0]
-rattle   = 0.6
+rattle   = 0.6              # 0 … 1, gated at the body's fundamental
 amp = [
   { ms = 0.0,   gain = 0.0 },
   { ms = 1.2,   gain = 1.0 },
@@ -50,10 +50,10 @@ amp = [
   { ms = 160.0, gain = 0.0 },
 ]
 
-[[noise]]
+[[noise]]                   # noise[3]
 level_db = -10.0
 band_hz  = [1200.0, 5500.0]
-rattle   = 0.7
+rattle   = 0.7              # 0 … 1, gated at the body's fundamental
 amp = [
   { ms = 0.0,   gain = 0.0 },
   { ms = 3.0,   gain = 1.0 },
@@ -63,11 +63,11 @@ amp = [
 ]
 
 [drive]
-db = 3.0
+db = 3.0                    # small-signal gain; 0 = bypass
 
 [output]
 sample_rate = 48000
-format      = "float32"
-mode        = "gain"
-db          = -15.3
+format      = "float32"     # "float32" | "pcm24" | "pcm16"
+mode        = "gain"        # "gain" | "peak" | "true-peak"
+db          = -15.3         # gain in dB, or peak target in dBFS
 polarity    = 1

@@ -38,6 +38,7 @@ INSTRUMENT = "snare"
 SCHEMA = 1
 SAMPLE_RATES = (44100, 48000, 88200, 96000)
 FORMATS = ("float32", "pcm24", "pcm16")
+MODES = ("gain", "peak", "true-peak")  # the output's gain, or a target for the sample peak or the true peak
 MAX_BODY_MS = 2000.0
 MAX_NOISE_MS = 1000.0  # the noise repeats every second
 MAX_LAYERS = 4
@@ -356,8 +357,8 @@ def _validate_output(o: object, problems: _Problems) -> None:
         return
     problems.integer("output.sample_rate", o.sample_rate, SAMPLE_RATES)
     problems.choice("output.format", o.format, FORMATS)
-    mode = problems.choice("output.mode", o.mode, ("gain", "peak"))
-    problems.number("output.db", o.db, -60.0, 0.0 if mode == "peak" else 24.0)
+    mode = problems.choice("output.mode", o.mode, MODES)
+    problems.number("output.db", o.db, -60.0, 24.0 if mode == "gain" else 0.0)
     problems.integer("output.polarity", o.polarity, (1, -1))
 
 
@@ -614,7 +615,7 @@ def dumps(p: Patch) -> str:
         [
             ("sample_rate", str(o.sample_rate), ""),
             ("format", f'"{o.format}"', '"float32" | "pcm24" | "pcm16"'),
-            ("mode", f'"{o.mode}"', '"gain" | "peak"'),
+            ("mode", f'"{o.mode}"', '"gain" | "peak" | "true-peak"'),
             ("db", _f(o.db), "gain in dB, or peak target in dBFS"),
             ("polarity", str(o.polarity), ""),
         ],

@@ -35,9 +35,13 @@ The first public release.
   frequency, `stretch` of chosen curves, `bursts` that write a clap train as
   ordinary knots, and `softer`, the same drum struck softer.
 - Exports at 44.1, 48, 88.2 and 96 kHz, as float32 or as 24- or 16-bit PCM
-  with seeded TPDF dither, at a gain or a sample peak, with the root key in a
-  `smpl` chunk and the patch and its provenance in a `snar` chunk, which
-  `halyard extract` gives back. Overs are reported, never clipped.
+  with seeded TPDF dither, at a gain, a sample peak or a true peak, with the
+  root key in a `smpl` chunk and the patch and its provenance in a `snar`
+  chunk, which `halyard extract` gives back. Overs are reported, never
+  clipped.
+- The true peak, measured exactly as the crest of the output's band-limited
+  reconstruction at 32 times the sample rate, and a `true-peak` output mode
+  that brings it to a target.
 - Round-robin sets of takes sharing one gain, with optional level matching.
 - `halyard audition`: live playback that re-renders on every save, on the
   backbeat or any beats of a tempo, over a bed, or alternating with a sample

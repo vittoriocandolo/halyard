@@ -120,7 +120,7 @@ def random_patch(rng: np.random.Generator) -> patch.Patch:
                 shape(int(rng.integers(3, 33)), float(rng.uniform(0, 5)), 990),
             ),
         )
-    mode = str(rng.choice(["gain", "peak"]))
+    mode = str(rng.choice(patch.MODES))
     return patch.Patch(
         seed=int(rng.integers(0, 2**63 - 1)),
         body=patch.Body(
@@ -137,7 +137,7 @@ def random_patch(rng: np.random.Generator) -> patch.Patch:
             int(rng.choice(patch.SAMPLE_RATES)),
             str(rng.choice(patch.FORMATS)),
             mode,
-            float(rng.uniform(-60, 0 if mode == "peak" else 24)),
+            float(rng.uniform(-60, 24 if mode == "gain" else 0)),
             int(rng.choice([1, -1])),
         ),
     )
@@ -390,7 +390,7 @@ def test_knot_counts_and_lengths() -> None:
         ("output.db", [-60, 24], [-60.5, 24.5]),
         ("output.sample_rate", [44100, 48000, 88200, 96000], [22050, 192000]),
         ("output.format", ["float32", "pcm24", "pcm16"], ["pcm32", "float64", 24]),
-        ("output.mode", ["gain", "peak"], ["loudness"]),
+        ("output.mode", ["gain", "peak", "true-peak"], ["loudness", "truepeak"]),
         ("output.polarity", [1, -1], [0, 2]),
         ("seed", [0, 2**63 - 1], [-1, 2**63]),
     ],
@@ -405,8 +405,10 @@ def test_domain_edges(path: str, good: list[object], bad: list[object]) -> None:
 
 def test_peak_target_is_at_most_full_scale() -> None:
     """Allow a peak target up to 0 dBFS, and no higher."""
-    make(**{"output.mode": "peak", "output.db": 0.0})
-    make(**{"output.mode": "peak", "output.db": -60.0})
+    for mode in ("peak", "true-peak"):
+        make(**{"output.mode": mode, "output.db": 0.0})
+        make(**{"output.mode": mode, "output.db": -60.0})
+        assert any(m.startswith("output.db") for m in reject(**{"output.mode": mode, "output.db": 0.1}))
     assert any(m.startswith("output.db") for m in reject(**{"output.mode": "peak", "output.db": 0.1}))
 
 

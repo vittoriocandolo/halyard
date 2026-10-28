@@ -121,10 +121,10 @@ def curve_for(relative_db: float, lovel: int, hivel: int) -> tuple[float, tuple[
     return 20.0 * math.log10(top), tuple(g / top for g in gains)
 
 
-def _synthesize(p: Patch) -> tuple[Floats, Domain]:
-    """Render one take at unity gain, and judge it."""
+def _synthesize(p: Patch) -> tuple[Floats, float, Domain]:
+    """Render one take at unity gain, and return it, the peak its level mode targets, and its judgement."""
     s = synthesize(p)
-    return s.out, domain(s)
+    return s.out, s.peak(p.output.mode), domain(s)
 
 
 def check_outputs(patches: list[tuple[str, Patch]]) -> None:
@@ -227,8 +227,8 @@ def _render(
     patches: list[tuple[str, Patch]],
     takes: int,
     workers: int | None,
-) -> tuple[list[list[Floats]], list[list[Domain]]]:
-    """Render every take of every layer at unity gain, in parallel processes, and judge each."""
+) -> tuple[list[list[Floats]], list[list[float]], list[list[Domain]]]:
+    """Render every take of every layer at unity gain, in parallel processes: each one, its peak and its judgement."""
     seeds = [take_seeds(p, takes) for _, p in patches]
     jobs = [dataclasses.replace(p, seed=s) for (_, p), ss in zip(patches, seeds, strict=True) for s in ss]
     n = min(len(jobs), workers or os.cpu_count() or 1)
@@ -242,19 +242,16 @@ def _render(
     else:
         done = [_synthesize(p) for p in jobs]
     outs = [[done[i * takes + j][0] for j in range(takes)] for i in range(len(patches))]
-    doms = [[done[i * takes + j][1] for j in range(takes)] for i in range(len(patches))]
-    return outs, doms
+    peaks = [[done[i * takes + j][1] for j in range(takes)] for i in range(len(patches))]
+    doms = [[done[i * takes + j][2] for j in range(takes)] for i in range(len(patches))]
+    return outs, peaks, doms
 
 
-def _set_gain(first: Patch, outs: list[list[Floats]], gains: list[list[float]]) -> float:
+def _set_gain(first: Patch, peaks: list[list[float]], gains: list[list[float]]) -> float:
     """Return the pack's one gain: the patches' own, or the one that brings the loudest file to the target."""
     if first.output.mode == "gain":
         return float(10.0 ** (first.output.db / 20.0))
-    peak = max(
-        float(np.max(np.abs(o), initial=0.0)) * g
-        for row, grow in zip(outs, gains, strict=True)
-        for o, g in zip(row, grow, strict=True)
-    )
+    peak = max(level * g for row, grow in zip(peaks, gains, strict=True) for level, g in zip(row, grow, strict=True))
     target = min(10.0 ** (first.output.db / 20.0), ceiling(first.output.format))
     return target / peak if peak > 0 else 1.0
 
@@ -287,7 +284,7 @@ def build(
         raise PackError(msg)
     check_outputs(patches)
     first = patches[0][1]
-    outs, doms = _render(patches, options.takes, workers)
+    outs, peaks, doms = _render(patches, options.takes, workers)
     rate = first.output.sample_rate
     loud = [[momentary_max(o, rate) for o in row] for row in outs]
     gains = [
@@ -297,7 +294,7 @@ def build(
         ]
         for row in loud
     ]
-    set_gain = _set_gain(first, outs, gains)
+    set_gain = _set_gain(first, peaks, gains)
     firsts = [row[0] for row in loud]
     _check_order(patches, firsts)
     relative = [x - firsts[0] for x in firsts]

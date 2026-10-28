@@ -32,10 +32,10 @@ from typing import TYPE_CHECKING, Any, NamedTuple, override
 
 import numpy as np
 import scipy
-from scipy.signal import upfirdn
+from scipy.signal import fftconvolve, upfirdn
 
 from . import __version__, cores, noise, wav
-from .loudness import momentary_max, true_peak
+from .loudness import momentary_max
 from .patch import MAX_SEED, Patch, describe_tuning, dumps
 from .voice import (
     Kinks,
@@ -217,7 +217,31 @@ class Synthesis:
     kink: float  # bound on the error from the curves' kinks, at unity gain and the patch's drive
     alpha: float
     band: float  # the decimator's passband edge, for the kink bound
+    true_peak: float  # the largest value of the output's band-limited reconstruction, at unity gain
     probes: Probes | None = field(default=None, compare=False, repr=False)
+
+    def peak(self, mode: str) -> float:
+        """Return the peak a level mode targets, at unity gain: the true peak for "true-peak", else the sample peak."""
+        return self.true_peak if mode == "true-peak" else float(np.max(np.abs(self.out), initial=0.0))
+
+
+def reconstructed_peak(y: Floats, taps: Floats) -> float:
+    """Return the true peak of the output that decimating y through `taps` gives, at unity gain.
+
+    The decimator's output at every internal sample, not only at every K-th,
+    is the output's band-limited reconstruction sampled at the internal rate:
+    exact to the filter's stopband, 115 dB down. Its largest value, refined
+    by the parabola through its two neighbours, is the true peak to within
+    10⁻⁷ of it for anything below 20 kHz.
+    """
+    z = fftconvolve(y, taps)
+    i = int(np.argmax(np.abs(z), axis=None)) if z.size else 0
+    if not 0 < i < z.size - 1:
+        return float(np.abs(z[i])) if z.size else 0.0
+    sign = math.copysign(1.0, z[i])
+    a, b, c = sign * z[i - 1], sign * z[i], sign * z[i + 1]
+    curve = a - 2 * b + c  # negative at a maximum
+    return float(b - (a - c) ** 2 / (8 * curve)) if curve < 0 else float(b)
 
 
 def loudest(mags: Floats, first: int, n: int, taken: list[int]) -> list[int]:
@@ -310,6 +334,7 @@ def synthesize(p: Patch, *, k: int = K, taps: Floats | None = None) -> Synthesis
         kink_bound(kinks, v.alpha, rate, band),
         v.alpha,
         band,
+        reconstructed_peak(y, taps),
         _probes(Grid(v, rate, factor, taps, n, tabs), out, slew),
     )
 
@@ -642,7 +667,7 @@ class Report:
         elif self.over and t.peak == self.peak:
             peak = self._over()
         else:
-            peak = f"{db(t.peak):.2f} dBFS sample, {db(t.true_peak):.2f} dBTP true (4× estimate, information only)"
+            peak = f"{db(t.peak):.2f} dBFS sample, {db(t.true_peak):.2f} dBTP true"
         loudness = (
             f"{t.loudness:.1f} LUFS, the largest 400 ms momentary loudness (BS.1770)"
             if t.loudness > -math.inf
@@ -715,16 +740,16 @@ def take_seeds(p: Patch, takes: object) -> list[int]:
     return [p.seed + j for j in range(takes)]
 
 
-def set_gains(outs: list[Floats], p: Patch, top: float, *, level_match: bool) -> tuple[float, list[float]]:
+def set_gains(synths: list[Synthesis], p: Patch, top: float, *, level_match: bool) -> tuple[float, list[float]]:
     """Return one gain for the whole set, and each take's gain from level matching (1 without)."""
     rate = p.output.sample_rate
-    takes = [1.0] * len(outs)
+    takes = [1.0] * len(synths)
     if level_match:
-        loud = [momentary_max(o, rate) for o in outs]
+        loud = [momentary_max(s.out, rate) for s in synths]
         takes = [10.0 ** ((loud[0] - x) / 20.0) if loud[0] > -math.inf and x > -math.inf else 1.0 for x in loud]
     if p.output.mode == "gain":
         return 10.0 ** (p.output.db / 20.0), takes
-    peak = max(float(np.max(np.abs(o), initial=0.0)) * g for o, g in zip(outs, takes, strict=True))
+    peak = max(s.peak(p.output.mode) * g for s, g in zip(synths, takes, strict=True))
     target = min(10.0 ** (p.output.db / 20.0), top)
     return (target / peak if peak > 0 else 1.0), takes
 
@@ -743,7 +768,7 @@ def render_takes(p: Patch, takes: int = 1, *, level_match: bool = False) -> tupl
     seeds = take_seeds(p, takes)
     top = ceiling(p.output.format)
     synths = [synthesize(dataclasses.replace(p, seed=s)) if s != p.seed else synthesize(p) for s in seeds]
-    gain, take_gains = set_gains([s.out for s in synths], p, top, level_match=level_match)
+    gain, take_gains = set_gains(synths, p, top, level_match=level_match)
     audio: list[NDArray[np.float32]] = []
     rows: list[Take] = []
     for j, (seed, s, g) in enumerate(zip(seeds, synths, take_gains, strict=True), 1):
@@ -756,7 +781,7 @@ def render_takes(p: Patch, takes: int = 1, *, level_match: bool = False) -> tupl
                 seed,
                 db(g),
                 float(np.max(np.abs(a), initial=0.0)),
-                true_peak(a),
+                s.true_peak * gain * g,
                 momentary_max(a, p.output.sample_rate),
                 d,
                 cause_of(p, s, d),

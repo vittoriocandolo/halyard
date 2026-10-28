@@ -58,6 +58,6 @@ db = 2.0                    # small-signal gain; 0 = bypass
 [output]
 sample_rate = 48000
 format      = "float32"     # "float32" | "pcm24" | "pcm16"
-mode        = "gain"        # "gain" | "peak"
-db          = -11.7          # gain in dB, or peak target in dBFS
+mode        = "gain"        # "gain" | "peak" | "true-peak"
+db          = -11.7         # gain in dB, or peak target in dBFS
 polarity    = 1
