@@ -312,19 +312,34 @@ windows, which overlap almost entirely, took the headroom search from 46 to
 about 25 ms each when warm.
 
 On the Oryon (12 cores, WSL 2, Python 3.15, NumPy 2.5.4, SciPy 1.18.1), with
-the exact true peak and the pack's workers sharing the cores:
+the exact true peak, the pack's workers sharing the cores, rims and the brush:
 
 | Sound | Rate | New seed | Cached | Budget | Memory above baseline |
 |---|---|---|---|---|---|
-| 0.5 s hit, three layers | 44.1 kHz | 123 ms | 100 ms | 300 ms | 192 MiB |
-| | 48 kHz | 117 ms | 87 ms | 300 ms | 232 MiB |
-| | 88.2 kHz | 152 ms | 118 ms | 300 ms | 249 MiB |
-| | 96 kHz | 142 ms | 101 ms | 300 ms | 257 MiB |
-| 2 s body, 1 s of noise | 44.1 kHz | 317 ms | 291 ms | 1.5 s | 207 MiB |
-| | 48 kHz | 319 ms | 286 ms | 1.5 s | 275 MiB |
-| | 88.2 kHz | 370 ms | 342 ms | 1.5 s | 193 MiB |
-| | 96 kHz | 353 ms | 332 ms | 1.5 s | 260 MiB |
-| Pack: 4 layers × 8 takes, 32 files | 48 kHz | 1.4 s | | 15 s | (worker processes) |
+| 0.5 s hit, three layers | 44.1 kHz | 123 ms | 91 ms | 300 ms | 204 MiB |
+| | 48 kHz | 121 ms | 85 ms | 300 ms | 166 MiB |
+| | 88.2 kHz | 151 ms | 108 ms | 300 ms | 214 MiB |
+| | 96 kHz | 129 ms | 103 ms | 300 ms | 203 MiB |
+| 2 s body, 1 s of noise | 44.1 kHz | 323 ms | 277 ms | 1.5 s | 249 MiB |
+| | 48 kHz | 312 ms | 261 ms | 1.5 s | 286 MiB |
+| | 88.2 kHz | 361 ms | 320 ms | 1.5 s | 216 MiB |
+| | 96 kHz | 359 ms | 308 ms | 1.5 s | 236 MiB |
+| The brush reference, five tables | 44.1 kHz | 167 ms | 128 ms | 300 ms | 207 MiB |
+| | 48 kHz | 151 ms | 122 ms | 300 ms | 233 MiB |
+| | 88.2 kHz | 194 ms | 145 ms | 300 ms | 277 MiB |
+| | 96 kHz | 174 ms | 126 ms | 300 ms | 270 MiB |
+| The rimshot reference, a hoop of four modes | 44.1 kHz | 77 ms | 56 ms | 300 ms | 109 MiB |
+| | 48 kHz | 67 ms | 44 ms | 300 ms | 116 MiB |
+| | 88.2 kHz | 82 ms | 57 ms | 300 ms | 133 MiB |
+| | 96 kHz | 70 ms | 44 ms | 300 ms | 132 MiB |
+| Pack: 4 layers × 8 takes, 32 files | 48 kHz | 1.5 s | | 15 s | (worker processes) |
+
+The heaviest a patch can be is four layers and a brush whose sweep spans an
+octave between two tables, which reads seven: 11 tables of 12 MiB at the
+48 kHz family's internal rate. It renders a new seed in 230 ms at 48 kHz and
+247 ms at 96 kHz, 294 and 270 MiB above the baseline, inside the budget with
+little to spare; the limit of one brush and of one octave of sweep keeps it
+there. A rim costs no table: its modes are sines.
 
 The exact true peak convolves the internal signal with the decimator once.
 The table was measured with an FFT convolution, which added 10–50 ms to these

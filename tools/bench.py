@@ -44,11 +44,12 @@ KIB = 1024  # ru_maxrss is in KiB on Linux
 
 
 class Case(NamedTuple):
-    """One hit to time: its export rate, its length (0 keeps the reference's) and whether it rings long."""
+    """One hit to time: its export rate, its length (0 keeps the reference's), whether it rings long, its reference."""
 
     rate: int
     ms: float
     long: bool
+    reference: str = "fat"
 
 
 def cpu() -> str:
@@ -68,8 +69,8 @@ def _memory() -> int:
 
 
 def hit(case: Case) -> dict[str, float]:
-    """Time a new seed's render and a repeated one of the fat reference, and its memory above the baseline."""
-    p = loads(cli.reference_text("fat").replace("sample_rate = 48000", f"sample_rate = {case.rate}"))
+    """Time a new seed's render and a repeated one of a reference, and its memory above the baseline."""
+    p = loads(cli.reference_text(case.reference).replace("sample_rate = 48000", f"sample_rate = {case.rate}"))
     if case.ms:
         p = stretch(p, "all", case.ms / p.length_ms, after_ms=0.0)
     if case.long:
@@ -114,12 +115,14 @@ def main() -> int:
     say(f"machine: {cpu()}, Python {platform.python_version()}, NumPy {np.__version__}, SciPy {scipy.__version__}")
     say(f"{'sound':<28s} {'rate':>6s} {'new seed':>9s} {'cached':>8s} {'limit':>7s} {'memory':>8s}")
     ok = True
-    for label, ms, long, limit in (
-        ("0.5 s hit, three layers", 500.0, False, HIT_S),
-        ("2 s body, 1 s of noise", 0.0, True, LONG_S),
+    for label, ms, long, reference, limit in (
+        ("0.5 s hit, three layers", 500.0, False, "fat", HIT_S),
+        ("2 s body, 1 s of noise", 0.0, True, "fat", LONG_S),
+        ("brush, swept over 380 ms", 0.0, False, "brush", HIT_S),
+        ("rimshot, a hoop of 4 modes", 0.0, False, "rimshot", HIT_S),
     ):
         for rate in RATES:
-            r = fresh(hit, Case(rate, ms, long))
+            r = fresh(hit, Case(rate, ms, long, reference))
             fine = r["fresh"] <= limit and r["mib"] <= MEMORY_MIB
             ok &= fine
             say(
