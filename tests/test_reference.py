@@ -202,3 +202,16 @@ def test_a_near_silent_take_is_judged_absolutely() -> None:
     assert v.error.near_silent
     assert v.passed
     assert "near-silent: limit 1e-07" in str(v)
+
+
+def test_a_silent_brush_costs_the_reference_nothing() -> None:
+    """Verify a patch with a silent brush exactly as without it: no table made, the same reference."""
+    brush = {
+        "level_db": -math.inf,
+        "band_hz": [900.0, 9000.0],
+        "rattle": 0.0,
+        "sweep": [{"ms": 0.0, "ratio": 1.0}, {"ms": 60.0, "ratio": 1.5}],
+        "amp": amp((0, 0), (25, 1), (240, 0)),
+    }
+    with_it, without = reference.reference(make(brush=[brush])), reference.reference(make())
+    assert np.array_equal(with_it.out, without.out)

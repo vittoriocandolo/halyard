@@ -517,3 +517,33 @@ def test_explicit_taps_are_used_as_given() -> None:
     assert np.array_equal(render.synthesize(p, taps=shipped).out, render.synthesize(p).out)
     halved = render.synthesize(p, taps=shipped / 2).out
     np.testing.assert_allclose(halved, render.synthesize(p).out / 2, rtol=1e-12, atol=1e-15)
+
+
+def test_a_crossing_is_named_by_its_segment_and_timed_by_itself() -> None:
+    """Name a kink where a brush's sweep crosses a table by the segment it lies in, at its own time, not a knot's."""
+    p = make(
+        brush=[
+            {
+                "level_db": 0.0,
+                "band_hz": [1500.0, 9000.0],
+                "rattle": 0.0,
+                "sweep": [{"ms": m, "ratio": r} for m, r in ((10.0, 1.0), (12.0, 2.0))],
+                "amp": [{"ms": m, "gain": g} for m, g in ((0, 0), (15, 1), (200, 0.3), (400, 0))],
+            },
+        ],
+    )
+    s = render.synthesize(p)
+    crossing = np.array(["–" in name for name in s.kinks.paths])
+    k = s.kinks
+    only = voice.Kinks(
+        tuple(n for n, c in zip(k.paths, crossing, strict=True) if c),
+        *(a[crossing] for a in (k.t, k.x, k.dx, k.d2, k.d3)),
+    )
+    assert set(only.paths) == {"brush[1].sweep[1–2]"}  # u = 3·log2 s crosses 1 and 2 between the knots
+    c = render.cause_of(p, dataclasses.replace(s, kinks=only), render.domain(s))
+    assert c.knot == "brush[1].sweep[1–2]"
+    assert c.knot_ms is not None
+    assert CROSSING_MS[0] < c.knot_ms < CROSSING_MS[1]
+
+
+CROSSING_MS = (10.0, 12.0)  # the segment's knots

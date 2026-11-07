@@ -36,8 +36,8 @@ import numpy as np
 
 from halyard_synth import patch, wav
 from halyard_synth.cli import REFERENCES, reference_text
-from halyard_synth.curve import Curve
 from halyard_synth.render import Stamp, render, write_take
+from halyard_synth.voice import voice
 from tools import say
 
 if TYPE_CHECKING:
@@ -288,8 +288,7 @@ def concept_figures() -> dict[str, str]:
     rate = brush.output.sample_rate
     swept_t, swept = mean_centroid(alone, rate)
     held_t, steady = mean_centroid(held, rate)
-    knots = patch.curve_knots(brush, "brush[1].sweep")
-    curve = Curve.pchip([ms / 1000 for ms, _ in knots], [r for _, r in knots], first=0.0, last=0.0)
+    curve = voice(brush).brushes[0].sweep  # the curve synthesis uses, not a copy of it
     ratio_t = np.linspace(0.0, 400.0, 401)
     span = (1000.0 * math.floor(min(swept.min(), steady.min()) / 1000), 1000.0 * math.ceil(swept.max() / 1000))
     centroid_ticks = [(v, f"{v / 1000:g}k") for v in np.arange(span[0], span[1] + 1, 1000.0)]

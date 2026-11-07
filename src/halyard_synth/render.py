@@ -45,6 +45,7 @@ from .voice import (
     internal,
     kink_bound,
     kink_bounds,
+    kink_contributions,
     kink_knots,
     kink_terms,
     sample_count,
@@ -418,6 +419,11 @@ def cause_of(p: Patch, s: Synthesis, d: Domain) -> Cause:
     if not total:
         return Cause(saturation, s.kink)
     path, c = knots[0]
+    if "–" in path:  # where a brush's sweep crosses a table, between two knots: its time is the largest such kink's
+        shares = kink_contributions(s.kinks, s.alpha, s.rate, s.band)
+        rows = [i for i, name in enumerate(s.kinks.paths) if name == path]
+        ms = 1000 * float(s.kinks.t[max(rows, key=lambda i: shares[i])])
+        return Cause(saturation, s.kink, path, ms, c / total)
     return Cause(saturation, s.kink, path, knot_ms(p, path), c / total)
 
 

@@ -174,7 +174,7 @@ def voice(p: Patch) -> Voice:
     for pb in p.brush:
         ratios = [r for _, r in pb.sweep]
         # Each segment of the sweep is monotone, so u is extreme at its knots: B(u − k) is 0 for k outside.
-        first, last = math.floor(STEPS * math.log2(min(ratios))) - 1, math.ceil(STEPS * math.log2(max(ratios))) + 1
+        first, last = reach(min(ratios), max(ratios))
         lo, hi = pb.band_hz
         audible = pb.level_db > -math.inf
         bands = tuple((lo * 2.0 ** (k / STEPS), hi * 2.0 ** (k / STEPS)) for k in range(first, last + 1))
@@ -232,6 +232,23 @@ def brush_tables(v: Voice, tabs: Tables) -> list[list[Floats]]:
 B_REACH = 2  # B is 0 from here out
 
 
+def reach(low: float, high: float) -> tuple[int, int]:
+    """Return the first and last k whose table a sweep between these ratios can weigh, and one more either way.
+
+    u = 3 log2 s runs between the ratios' u, and B(u − k) is 0 unless |u − k| < 2;
+    the extra k either way only ever weighs 0, and absorbs rounding.
+    """
+    return math.floor(STEPS * math.log2(low)) - 1, math.ceil(STEPS * math.log2(high)) + 1
+
+
+def bspline_value(x: Floats) -> Floats:
+    """Return B(x) alone, by the same operations as `bspline`, for synthesis."""
+    a = np.abs(x)
+    c = np.where((a >= 1) & (a < B_REACH), 2 - a, 0.0)
+    out: Floats = np.where(a < 1, 2 / 3 - a * a + a**3 / 2, c**3 / 6)
+    return out
+
+
 def bspline(x: Floats) -> tuple[Floats, Floats, Floats]:
     """Return the cubic B-spline B(x), on [−2, 2], with its first and second derivatives: C², B‴ steps."""
     a = np.abs(x)
@@ -270,8 +287,10 @@ def sources(v: Voice, rate: int, n0: int, n1: int, tabs: Tables) -> Floats:
         if basis and s.start < s.stop:  # none: a silent brush
             u = brush.u(t[s], on=True)
             blend = np.zeros(s.stop - s.start)
+            near = range(math.floor(u.min()) - 1, math.ceil(u.max()) + 2)  # B(u − k) is 0 for every other k here
             for k, table in enumerate(basis, brush.first):
-                blend += bspline(u - k)[0] * _read(table, rate, n0, s)
+                if k in near:
+                    blend += bspline_value(u - k) * _read(table, rate, n0, s)
             x[s] += _envelope(brush, t, s, rattle) * blend
     for ring in v.rings:
         if ring.gain:
@@ -689,7 +708,7 @@ def crossings(brush: Brush) -> tuple[Floats, Floats, NDArray[np.intp]]:
         if ra == rb:
             continue
         # Candidates from u at the ends, one wider either way for rounding; the levels decide, as ratios.
-        lowest, highest = math.floor(STEPS * math.log2(min(ra, rb))) - 1, math.ceil(STEPS * math.log2(max(ra, rb))) + 1
+        lowest, highest = reach(min(ra, rb), max(ra, rb))
         ms = range(lowest, highest + 1) if rb > ra else range(highest, lowest - 1, -1)  # in the order u meets them
         for m in ms:
             level = 2.0 ** (m / STEPS)
@@ -743,7 +762,8 @@ def _sweep_rows(v: Voice, rate: int, tabs: Tables) -> list[Row]:
             for k, table in enumerate(basis, brush.first):
                 jump = np.array([B3_JUMPS.get(int(m) - k, 0.0) for m in levels])
                 d3 += carrier * jump * cube * noise.interpolate(table, rate, tau)[0]
-            rows.append(Row([f"{path}[{g + 1}]" for g in segments], tau, s, np.zeros_like(tau), d3))
+            # Named by the segment they lie in, between two knots: a crossing is not a knot.
+            rows.append(Row([f"{path}[{g + 1}–{g + 2}]" for g in segments], tau, s, np.zeros_like(tau), d3))
     return rows
 
 

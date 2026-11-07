@@ -38,7 +38,7 @@ from scipy.signal import upfirdn
 
 from . import noise
 from .render import FAMILY, Domain, K, decimator, domain, rates, synthesize, take_seeds
-from .voice import Voice, sample_count, saturate, sources, voice
+from .voice import Layer, Voice, bspline_value, sample_count, saturate, sources, voice
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -66,16 +66,41 @@ def mask(length: int, hi_rate: int, rate: int) -> Floats:
     return out
 
 
-def reference_tables(v: Voice, rate: int) -> list[Floats | None]:
-    """Return the exact noise tables at a reference rate, as `voice.Tables` orders them, uncached: large, used once."""
-    layers = [noise.table(v.seed, *layer.band, rate) if layer.gain else None for layer in v.layers]
-    return layers + [noise.table(v.seed, *band, rate) for b in v.brushes for band in b.bands]
+def reference_tables(v: Voice, rate: int) -> tuple[Voice, list[Floats | None]]:
+    """Return the voice and its exact noise tables at a reference rate, uncached: they are large and used once.
+
+    A brush's tables are blended into one as they are made, Σ_k B(u − k) n_k
+    over the period, and the brush becomes a layer that plays it: the same
+    operations in the same order as synthesis, so the same samples, but one
+    table held at a time instead of up to seven, which at 512 × base take
+    196 MB each.
+    """
+    tabs = [noise.table(v.seed, *layer.band, rate) if layer.gain else None for layer in v.layers]
+    layers = list(v.layers)
+    for b in v.brushes:
+        if not b.bands:  # a silent brush
+            continue
+        blend = np.zeros(rate)
+        for k, band in enumerate(b.bands, b.first):
+            table = noise.table(v.seed, *band, rate)
+            for a in range(0, rate, BLEND_CHUNK):
+                part = slice(a, min(a + BLEND_CHUNK, rate))
+                u = b.u(np.arange(part.start, part.stop) / rate, on=True)
+                blend[part] += bspline_value(u - k) * table[part]
+            del table
+        # The layer's band is a label only: its table is the blend, never made from a band.
+        layers.append(Layer(b.gain, b.bands[len(b.bands) // 2], b.rattle, b.amp))
+        tabs.append(blend)
+    return dataclasses.replace(v, layers=tuple(layers), brushes=()), tabs
+
+
+BLEND_CHUNK = 2**20  # samples of a blend computed at once
 
 
 def band_limited(v: Voice, rate: int, n_start: int, n_stop: int, m: int) -> Floats:
     """Return ŷ_F[n] for n_start ≤ n < n_stop: y rendered at m·F, masked above F/2, every m-th sample."""
     hi = m * rate
-    tabs = reference_tables(v, hi)
+    v, tabs = reference_tables(v, hi)
     out = np.empty(n_stop - n_start)
     for a in range(n_start, n_stop, SEGMENT):
         b = min(a + SEGMENT, n_stop)
