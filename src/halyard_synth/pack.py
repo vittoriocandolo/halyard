@@ -37,7 +37,7 @@ from .patch import Patch, PatchError, load
 from .render import Domain, RenderError, Stamp, ceiling, db, domain, output_stage, synthesize, take_seeds, write_take
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
     from numpy.typing import NDArray
 
@@ -257,6 +257,12 @@ def _set_gain(first: Patch, peaks: list[list[float]], gains: list[list[float]]) 
     return target / peak if peak > 0 else 1.0
 
 
+def mean_loudness(loudness: Sequence[float]) -> float:
+    """Return takes' loudness together, in LUFS: the mean of their powers; -inf when every one is silent."""
+    powers = [10.0 ** (x / 10.0) for x in loudness if x > -math.inf]
+    return 10.0 * math.log10(sum(powers) / len(loudness)) if powers else -math.inf
+
+
 def _check_order(patches: list[tuple[str, Patch]], firsts: list[float]) -> None:
     """Refuse a silent layer, and layers not given loudest first."""
     if any(x == -math.inf for x in firsts):
@@ -286,17 +292,18 @@ def build(
     check_outputs(patches)
     first = patches[0][1]
     outs, peaks, doms = _render(patches, options.takes, workers)
+    if options.level_match and (varied := [n for n, p in patches if p.takes and p.takes.strength_db]):
+        msg = f"{', '.join(varied)}: level matching would undo how much harder or softer [takes] strikes each take"
+        raise PackError(msg)
     rate = first.output.sample_rate
     loud = [[momentary_max(o, rate) for o in row] for row in outs]
+    # A layer is as loud as its takes together, so no one take, struck harder or softer, decides where it goes.
+    firsts = [mean_loudness(row) for row in loud]
     gains = [
-        [
-            (10.0 ** ((row[0] - x) / 20.0) if options.level_match and row[0] > -math.inf and x > -math.inf else 1.0)
-            for x in row
-        ]
-        for row in loud
+        [(10.0 ** ((m - x) / 20.0) if options.level_match and m > -math.inf and x > -math.inf else 1.0) for x in row]
+        for row, m in zip(loud, firsts, strict=True)
     ]
     set_gain = _set_gain(first, peaks, gains)
-    firsts = [row[0] for row in loud]
     _check_order(patches, firsts)
     relative = [x - firsts[0] for x in firsts]
     ranges = velocity_ranges(relative)

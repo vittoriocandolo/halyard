@@ -366,10 +366,10 @@ def dominant_hz(x: Floats, start_ms: float, length_ms: float) -> float:
 
 
 def test_shorten_the_zap() -> None:
-    """Shorten the zap's fall with one command: higher still 15 ms in, where the written fall has nearly landed."""
+    """Shorten the zap's fall with one command: lower already 4 ms in, where the written fall is still high."""
     p = ref("zap")
-    quicker = patch.stretch(p, "body.pitch", 2.0)  # one command: a fall twice as long
-    assert dominant_hz(audio(quicker), 12, 8) > 1.2 * dominant_hz(audio(p), 12, 8)
+    quicker = patch.stretch(p, "body.pitch", 0.5)  # one command: a fall half as long
+    assert dominant_hz(audio(quicker), 3, 3) < 0.8 * dominant_hz(audio(p), 3, 3)
 
 
 def test_start_the_zap_lower() -> None:

@@ -63,7 +63,7 @@ def k_weighting(rate: int) -> Floats:
         (1.0 - k / SHELF_Q + k * k) / a0,
     ]
     k = math.tan(math.pi * HIGHPASS_HZ / rate)
-    a0 = 1.0 + k / HIGHPASS_Q + k * k
+    a0 = _passband(rate)  # the high-pass's denominator and its passband gain are one expression
     g = _passband(STANDARD_RATE) / a0  # the passband gain is a0; 1 at the standard's rate
     highpass = [g, -2.0 * g, g, 1.0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / HIGHPASS_Q + k * k) / a0]
     return np.array([shelf, highpass])

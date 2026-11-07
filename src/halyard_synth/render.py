@@ -36,7 +36,7 @@ from scipy.signal import oaconvolve, upfirdn
 
 from . import __version__, cores, noise, wav
 from .loudness import momentary_max
-from .patch import MAX_SEED, Patch, curve_knots, describe_tuning, dumps
+from .patch import MAX_SEED, Patch, curve_knots, describe_tuning, dumps, played
 from .voice import (
     Kinks,
     Slew,
@@ -424,7 +424,7 @@ def cause_of(p: Patch, s: Synthesis, d: Domain) -> Cause:
         rows = [i for i, name in enumerate(s.kinks.paths) if name == path]
         ms = 1000 * float(s.kinks.t[max(rows, key=lambda i: shares[i])])
         return Cause(saturation, s.kink, path, ms, c / total)
-    return Cause(saturation, s.kink, path, knot_ms(p, path), c / total)
+    return Cause(saturation, s.kink, path, knot_ms(played(p), path), c / total)  # where the take has it
 
 
 HEADROOM_STEP_DB = 0.5  # the scan's grid; every jump of the knee slew is a candidate as well
@@ -749,6 +749,9 @@ def set_gains(synths: list[Synthesis], p: Patch, top: float, *, level_match: boo
     rate = p.output.sample_rate
     takes = [1.0] * len(synths)
     if level_match:
+        if p.takes and p.takes.strength_db:
+            msg = "--level-match would undo how much harder or softer [takes] strikes each take"
+            raise RenderError(msg)
         loud = [momentary_max(s.out, rate) for s in synths]
         takes = [10.0 ** ((loud[0] - x) / 20.0) if loud[0] > -math.inf and x > -math.inf else 1.0 for x in loud]
     if p.output.mode == "gain":

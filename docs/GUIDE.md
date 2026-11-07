@@ -160,16 +160,20 @@ played:
 | Field | Range | What it does |
 |---|---|---|
 | `strength_db` | 0 – 6 | Each take is struck up to this much harder or softer, by `softer`'s rules: its level, glide, rises and top move together. |
-| `timing_ms` | 0 – 5 | Each rise of a layer, rim or brush after its first, such as a clap's later bursts, moves up to this much earlier or later, with what follows it. |
+| `timing_ms` | 0 – 5 | Each later event of the hit, such as a clap's later burst or a roll's next stroke, moves up to this much earlier or later, with everything after it. |
 
-The body and the first rise of every shape stay where they are, so every take
-stays on the beat, and no move brings two knots within 10 µs or a shape past
-its limit. Every take is drawn from the seed alone, under its own key, so it
+An event is a rise after the first of any shape, with every rise of the other
+shapes within 1 ms of it, and time itself moves there: the body, its glide,
+the layers, rims and brush and its sweep together, so a stroke stays one
+stroke. The hit's first rise stays on the beat, and no move brings two knots
+within 10 µs or a curve past its limit. Every take is drawn from the seed alone, under its own key, so it
 is the same take in every version and on every platform, and a take's WAV
 carries the patch that renders it again, `[takes]` included. A patch whose
 hardest or softest take would leave the valid domain is refused. One to two dB
 and a millisecond or two make a 16th-note roll sound played; a clap's timing
-is its hands.
+is its hands. A pack places a layer by its takes' loudness together, and
+`--level-match` is refused for takes that differ in strength, since it would
+undo them.
 
 ### Drive
 
@@ -269,7 +273,8 @@ fail, and say why, rather than clamp.
   turn, so a stroke costs a shape as many knots as it has before the next
   stroke: a snare's five-knot stick allows about six strokes, a clap's train
   two, and the noise's second ends a long roll. It fails, naming the shape,
-  rather than drop knots.
+  rather than drop knots, and rather than start a stroke before the one
+  before it strikes.
 
 ## Recipes
 

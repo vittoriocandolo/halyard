@@ -1121,7 +1121,10 @@ def shape_curve(knots: patch.Knots) -> Callable[[np.ndarray], np.ndarray]:
     return lambda ms: c(ms / 1000)
 
 
-@pytest.mark.parametrize("name", cli.REFERENCES)
+SWELLS = ("reverse",)  # references whose strike is the end of a long swell, too late for a 25 ms flam
+
+
+@pytest.mark.parametrize("name", [n for n in cli.REFERENCES if n not in SWELLS])
 def test_a_flam_is_the_grace_then_the_main_stroke(name: str) -> None:
     """Find every shape the softer grace's, then from the main stroke's peak on the main stroke's, moved by the gap."""
     p = loads(cli.reference_text(name))
@@ -1161,6 +1164,15 @@ def test_a_flam_takes_a_grace_softer_than_softer_could_write(name: str) -> None:
     assert problems(patch.softer, p, 60)
     q = patch.flam(p, GAP_MS, 60)
     assert (q.noise[0].band_hz, q.body.level_db) == (p.noise[0].band_hz, p.body.level_db)
+
+
+def test_strokes_never_run_into_each_other() -> None:
+    """Refuse a stroke that starts before the one before it strikes, rather than lose it, as a fast roll would."""
+    found = problems(patch.flam, loads(cli.reference_text("reverse")), GAP_MS)
+    assert found[0].startswith("stroke 2: starts 25.0 ms after stroke 1, which strikes")
+    collapsing = problems(patch.roll, loads(cli.reference_text("house")), patch.Roll(8, 4.0, 0.2))
+    assert collapsing[0].startswith("stroke ")
+    assert "space the strokes further apart" in collapsing[0]
 
 
 def test_a_flam_of_rims_and_a_brush(example_dict: dict[str, Any]) -> None:
@@ -1339,3 +1351,34 @@ def test_a_move_never_brings_knots_within_10_us_nor_past_the_limit() -> None:
         times = [ms for ms, _ in take.noise[0].amp]
         assert all(b - a >= 0.01 - 1e-9 for a, b in itertools.pairwise(times))
         assert times[-1] <= patch.MAX_NOISE_MS
+
+
+def peak_times(knots: patch.Knots) -> list[float]:
+    """Return the times of a shape's peaks: knots louder than both neighbours."""
+    return [knots[i][0] for i in range(1, len(knots) - 1) if knots[i - 1][1] < knots[i][1] > knots[i + 1][1]]
+
+
+def test_a_take_moves_each_stroke_whole() -> None:
+    """Move each later stroke of a roll's take with its body and its layers together, by one draw each."""
+    roll = patch.roll(loads(cli.reference_text("house")), patch.Roll(3, 80.0))
+    p = dataclasses.replace(roll, takes=patch.Takes(0.0, 5.0))
+    for seed in range(1, 9):
+        take = patch.played(dataclasses.replace(p, seed=seed))
+        moves = [
+            [round(b - a, 6) for a, b in zip(peak_times(before), peak_times(after), strict=True)]
+            for before, after in ((p.body.amp, take.body.amp), (p.noise[0].amp, take.noise[0].amp))
+        ]
+        assert moves[0] == moves[1]  # the head and the stick of every stroke move as one
+        assert moves[0][0] == 0.0  # the first stroke stays on the beat
+
+
+def test_takes_are_checked_with_every_other_problem_and_stack_keeps_them(example_dict: dict[str, Any]) -> None:
+    """Report a bad [takes] beside other problems, and keep a stack's one [takes], refusing two that differ."""
+    found = problems(from_dict, dict(example_dict, drive={"db": 60.0}, takes=dict(TAKES, strength_db=9.0)))
+    assert any(m.startswith("drive.db") for m in found)
+    assert any(m.startswith("takes.strength_db") for m in found)
+    snare, clap = loads(cli.reference_text("house")), loads(cli.reference_text("clap"))
+    played = dataclasses.replace(clap, takes=patch.Takes(1.0, 2.0))
+    assert patch.stack(snare, played).takes == played.takes
+    other = dataclasses.replace(snare, takes=patch.Takes(2.0, 2.0))
+    assert problems(patch.stack, other, played)[0].startswith("takes: both patches say how their takes differ")

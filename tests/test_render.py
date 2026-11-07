@@ -565,3 +565,10 @@ def test_takes_that_differ_render_as_played_and_their_files_render_again(tmp_pat
         assert own.takes == p.takes
         again, _ = render.render(own)  # a gain-mode set: every take at the patch's own gain
         np.testing.assert_allclose(again, a, rtol=0, atol=1e-7)
+
+
+def test_level_matching_would_undo_takes_and_is_refused() -> None:
+    """Refuse to match the loudness of takes that [takes] strikes harder and softer on purpose."""
+    p = dataclasses.replace(loads(cli.reference_text("house")), takes=patch.Takes(2.0, 0.0))
+    with pytest.raises(render.RenderError, match="would undo"):
+        render.render_takes(p, 3, level_match=True)

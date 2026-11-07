@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import soundfile
 
-from halyard_synth import cli, pack, wav
+from halyard_synth import cli, pack, patch, wav
 from halyard_synth.loudness import momentary_max
 from halyard_synth.patch import dumps, loads, softer
 
@@ -128,10 +128,11 @@ def test_the_level_follows_the_square_law_across_layer_boundaries(built: pack.Pa
     levels = []
     assert len(groups) == len(built.layers)
     for group in groups:
-        # The level of the layer's first take, measured from its file.
-        name = next(r["sample"] for r in regions(text) if r["lovel"] == group["lovel"] and r["seq_position"] == "1")
-        data, _ = soundfile.read(tmp_path / name, dtype="float64")
-        loud = momentary_max(data, rate)
+        # The level of the layer: its takes together, measured from their files.
+        names = [r["sample"] for r in regions(text) if r["lovel"] == group["lovel"]]
+        loud = pack.mean_loudness(
+            [momentary_max(soundfile.read(tmp_path / name, dtype="float64")[0], rate) for name in names],
+        )
         top = loud if top is None else top
         for v in range(int(group["lovel"]), int(group["hivel"]) + 1):
             c = float(group[f"amp_velcurve_{v}"])
@@ -265,3 +266,18 @@ def test_the_command_refuses_what_it_cannot_pack(
         assert pack.pack(map(str, paths), out, options) == status
         assert message in capsys.readouterr().err
     assert not out.exists()
+
+
+def test_a_layer_is_as_loud_as_its_takes_together_and_takes_that_vary_refuse_matching(ladder: list[Path]) -> None:
+    """Place a layer by its takes' mean power, and refuse level matching that would undo [takes]."""
+    assert pack.mean_loudness([-20.0, -20.0]) == pytest.approx(-20.0)
+    assert pack.mean_loudness([-20.0, -math.inf]) == pytest.approx(-20.0 - 10 * math.log10(2))
+    assert pack.mean_loudness([-math.inf, -math.inf]) == -math.inf
+    varied = [
+        (p.stem, dataclasses.replace(loads(p.read_text(encoding="utf-8")), takes=patch.Takes(2.0, 0.0)))
+        for p in ladder[:2]
+    ]
+    with pytest.raises(pack.PackError, match="level matching would undo"):
+        pack.build(varied, pack.Options(2, level_match=True))
+    played = pack.build(varied, pack.Options(2))
+    assert played.layers[0].loudness > played.layers[1].loudness

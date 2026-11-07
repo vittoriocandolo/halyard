@@ -303,7 +303,7 @@ def _validate(p: Patch, problems: _Problems) -> None:
         _validate_brushes(brush, problems)
     _validate_drive(p.drive, problems)
     _validate_output(p.output, problems)
-    if p.takes is not None and not problems:
+    if p.takes is not None:
         _validate_takes(p, problems)
 
 
@@ -315,7 +315,7 @@ def _validate_takes(p: Patch, problems: _Problems) -> None:
         return
     strength = problems.number("takes.strength_db", t.strength_db, 0.0, MAX_TAKE_DB)
     problems.number("takes.timing_ms", t.timing_ms, 0.0, MAX_TAKE_MS)
-    if not strength:
+    if not strength or problems:  # the extremes are checked only on a patch with nothing else wrong
         return
     plain = dataclasses.replace(p, takes=None)
     for db, how in ((-strength, "harder"), (strength, "softer")):
@@ -696,6 +696,8 @@ def from_dict(data: object) -> Patch:
     takes = None
     if "takes" in data and (t := _section(problems, "takes", data["takes"], _FIELDS["takes"])) is not None:
         takes = Takes(_float(t["strength_db"]), _float(t["timing_ms"]))
+        problems.number("takes.strength_db", takes.strength_db, 0.0, MAX_TAKE_DB)
+        problems.number("takes.timing_ms", takes.timing_ms, 0.0, MAX_TAKE_MS)
     # Anything missing or unbuilt has been reported, so with no problem every part is there and checked.
     if problems or body is None or noise is None or rim is None or brush is None or drive is None or output is None:
         raise PatchError(problems)
@@ -1325,8 +1327,8 @@ def strokes(
     glide follows the head's motion. The decay compresses from the shape's
     first knot at gain 1, the first of the loudest strokes, so a softer stroke
     before it rings its higher modes as long as its fundamental. Times are
-    written to 1 µs, gains and ratios to 6 decimals; it fails rather than drop
-    knots.
+    written to 1 µs, gains and ratios to 6 decimals. It fails rather than drop
+    knots, and rather than start a stroke before the one before it has peaked.
     """
     levels = [10 ** (-db / 20) for _, db in hits]
     for (_, db), v in zip(hits, levels, strict=True):
@@ -1341,34 +1343,63 @@ def strokes(
         scale = Decimal(repr(levels[k]))
         return [(ms, float(round(_dec(g) * scale, 6))) for ms, g in _struck_rises(knots, levels[k], contact)]
 
+    # A stroke's strike is the earliest peak among its sounding shapes: the next stroke must not start before it,
+    # or the strokes would run into each other and one would be lost.
+    sounding = [c for c in curve_names(p) if c.endswith(".amp") and _sounds(p, c)]
+    for k in range(1, len(hits)):
+        strike = (
+            min(
+                _dec(next(ms for ms, g in shape if g == max(g for _, g in shape))) - _dec(shape[0][0])
+                for shape in (stroke(curve_knots(p, c), k - 1) for c in sounding)
+            )
+            if sounding
+            else Decimal(0)
+        )
+        if starts[k] - starts[k - 1] < strike + MIN_SPACING_MS:
+            raise PatchError(
+                [
+                    (
+                        f"stroke {k + 1}: starts {_ms(starts[k] - starts[k - 1])} ms after stroke {k}, which strikes "
+                        f"{_ms(strike)} ms in; space the strokes further apart"
+                    ),
+                ],
+            )
+
     def joined(path: str) -> Knots:
         main = curve_knots(p, path)
         out = stroke(main, 0)
-        previous = out
         for k in range(1, len(hits)):
             start = _dec(main[0][0]) + starts[k]
-            curve = amplitude_curve([ms / 1000 for ms, _ in previous], [g for _, g in previous])
+            # The joined curve so far is what sounds just before this stroke, so its value there is the join.
+            curve = amplitude_curve([ms / 1000 for ms, _ in out], [g for _, g in out])
             residual = float(round(Decimal(repr(float(curve(float(start) / 1000)))), 6))
             mine = [(_ms(_dec(ms) + starts[k]), g) for ms, g in stroke(main, k)]
             out = [*(kn for kn in out if _dec(kn[0]) <= start - MIN_SPACING_MS), (_ms(start), residual), *mine[1:]]
-            previous = mine
         return tuple(out)
 
-    peak = _dec(next(ms for ms, g in p.body.amp if g == 1.0))
     glided = [
         p.body.pitch if not db else _struck_glide(p.body.pitch, v, glide)
         for (_, db), v in zip(hits, levels, strict=True)
     ]
     pitch = list(glided[0])
-    previous = pitch
     for k in range(1, len(hits)):
-        curve = pitch_curve([ms / 1000 for ms, _ in previous], [r for _, r in previous])
+        body = stroke(p.body.amp, k)  # this stroke's own body, its rise lengthened when it is softer
+        peak = _dec(next(ms for ms, g in body if g == max(g for _, g in body)))
+        curve = pitch_curve([ms / 1000 for ms, _ in pitch], [r for _, r in pitch])
         residual = float(round(Decimal(repr(float(curve(float(starts[k]) / 1000)))), 6))
         mine = [(_ms(_dec(ms) + starts[k] + peak), r) for ms, r in glided[k]]
         pitch = [*(kn for kn in pitch if _dec(kn[0]) <= starts[k] - MIN_SPACING_MS), (_ms(starts[k]), residual), *mine]
-        previous = mine
     curves = {c: joined(c) for c in curve_names(p) if c.endswith(".amp")}
     return _set_curves(p, {**curves, "body.pitch": tuple(pitch)})
+
+
+def _sounds(p: Patch, path: str) -> bool:
+    """Whether the source an amplitude shape belongs to is audible."""
+    if path == "body.amp":
+        return p.body.level_db > -math.inf
+    kind, index = path[: path.index("[")], int(path[path.index("[") + 1 : path.index("]")]) - 1
+    sources: dict[str, tuple[Layer | Rim | Brush, ...]] = {"noise": p.noise, "rim": p.rim, "brush": p.brush}
+    return sources[kind][index].level_db > -math.inf
 
 
 def stack(a: Patch, b: Patch, db: float = 0.0) -> Patch:
@@ -1378,8 +1409,9 @@ def stack(a: Patch, b: Patch, db: float = 0.0) -> Patch:
     of a patch; the body is the one that sounds, and two sounding bodies are
     refused, since a patch is one drum's head. The drive, the output and the
     seed are a's, so b's noise is the same noise in its own bands, drawn for
-    a's seed, and its layers' rattle follows the body the stack keeps. Levels
-    are written to 6 decimals.
+    a's seed, and its layers' rattle follows the body the stack keeps. How its
+    takes differ is whichever of the two says, and two that differ are
+    refused. Levels are written to 6 decimals.
     """
     if not math.isfinite(db):
         raise PatchError([f"--db: must be a finite number, found {db!r}"])
@@ -1389,6 +1421,8 @@ def stack(a: Patch, b: Patch, db: float = 0.0) -> Patch:
         """Raise one of b's levels by db, keeping silence silent."""
         return x if x == -math.inf else float(round(_dec(x) + louder, 6))
 
+    if a.takes is not None and b.takes is not None and a.takes != b.takes:
+        raise PatchError(["takes: both patches say how their takes differ, and differently; keep one [takes]"])
     sounding = [p.body for p in (a, b) if p.body.level_db > -math.inf]
     if len(sounding) > 1:
         raise PatchError(["body: both patches have a sounding body, and a patch is one drum's head; silence one"])
@@ -1403,6 +1437,7 @@ def stack(a: Patch, b: Patch, db: float = 0.0) -> Patch:
         noise=(*a.noise, *(dataclasses.replace(n, level_db=level(n.level_db)) for n in b.noise)),
         rim=(*a.rim, *(dataclasses.replace(r, level_db=level(r.level_db)) for r in b.rim)),
         brush=(*a.brush, *(dataclasses.replace(r, level_db=level(r.level_db)) for r in b.brush)),
+        takes=a.takes or b.takes,
     )
 
 
@@ -1411,12 +1446,15 @@ def played(p: Patch) -> Patch:
 
     Every take is drawn from SHAKE-256 of its own key and the seed, so a take is
     the same in every version and on every platform. It is the drum struck
-    softer by d dB, by softer's rules, d drawn evenly from ±`strength_db`; then
-    every rise of a layer, rim or brush after its first, such as a clap's later
-    bursts, moves by up to ±`timing_ms`, with every knot after it, never closer
-    to the knot before than 10 µs nor past the shape's limit. The body and the
-    first rise of every shape stay where they are, so a take stays on the beat.
-    The result has no [takes]: it is that one take.
+    softer by d dB, by softer's rules, d drawn evenly from ±`strength_db`. Then
+    time itself moves at every later event of the hit: a rise after the first
+    of any shape, such as a clap's later burst or a roll's next stroke, with
+    every rise in the other shapes within 1 ms of it. Each event moves by a
+    draw within ±`timing_ms`, and everything at or after it moves with it,
+    the body, its glide, the layers, rims and brush and its sweep alike, so a
+    stroke stays one stroke. No move brings two knots of a curve within 10 µs
+    or a curve past its limit, and the hit's first rise stays on the beat. The
+    result has no [takes]: it is that one take.
     """
     t = p.takes
     if t is None:
@@ -1429,25 +1467,50 @@ def played(p: Patch) -> Patch:
         q = softer(q, softness)
     if not t.timing_ms:
         return q
-    curves = {}
-    for name in curve_names(q):
-        if name.endswith(".amp") and not name.startswith("body"):
-            limit = Decimal(repr(MAX_BODY_MS if name.startswith("rim") else MAX_NOISE_MS))
-            curves[name] = _moved(curve_knots(q, name), t.timing_ms, draws, limit)
+    names = curve_names(q)
+    times = _warped(q, names, _dec(t.timing_ms), draws)
+    curves = {c: tuple((_ms(x), v) for x, (_, v) in zip(times[c], curve_knots(q, c), strict=True)) for c in names}
     return _set_curves(q, curves)
 
 
-_TAKE_DRAWS = 1 + 7 * MAX_KNOTS  # a strength, and a move for every rise of every layer, rim and brush, at most
+def _events(q: Patch, names: Sequence[str]) -> list[Decimal]:
+    """Return a hit's later events: the start of every rise after the first of a shape, those within 1 ms as one."""
+    starts = sorted(
+        _dec(curve_knots(q, c)[first][0])
+        for c in names
+        if c.endswith(".amp")
+        for first, _ in rises([g for _, g in curve_knots(q, c)])[1:]
+    )
+    events: list[Decimal] = []
+    for x in starts:
+        if not events or x - events[-1] > EVENT_MS:
+            events.append(x)
+    return events
 
 
-def _moved(knots: Knots, timing_ms: float, draws: Iterator[int], limit: Decimal) -> Knots:
-    """Move every rise after the first by a draw within ±timing_ms, and every knot after it with it."""
-    times, gains = [_dec(ms) for ms, _ in knots], [g for _, g in knots]
-    reach = _dec(timing_ms)
-    for first, _ in rises(gains)[1:]:
-        u = Decimal(next(draws)) / Decimal(2**53)
-        move = (reach * (2 * u - 1)).quantize(_US)  # to 1 µs first, so the bounds below hold as written
-        move = max(move, MIN_SPACING_MS - (times[first] - times[first - 1]))  # never closer than 10 µs
-        move = min(move, limit - times[-1])  # never past the shape's limit
-        times = [*times[:first], *(x + move for x in times[first:])]
-    return tuple((_ms(x), g) for x, g in zip(times, gains, strict=True))
+def _warped(q: Patch, names: Sequence[str], reach: Decimal, draws: Iterator[int]) -> dict[str, list[Decimal]]:
+    """Return every curve's knot times with each event and all after it moved by a draw within ±reach."""
+    times = {c: [_dec(ms) for ms, _ in curve_knots(q, c)] for c in names}
+    moved = Decimal(0)
+    for event in _events(q, names):
+        at = event + moved  # where the event is now, after the moves before it
+        move = (reach * (2 * Decimal(next(draws)) / Decimal(2**53) - 1)).quantize(_US)
+        for c in names:
+            later = [i for i, x in enumerate(times[c]) if x >= at]
+            if later and later[0]:  # never within 10 µs of the knot before
+                move = max(move, MIN_SPACING_MS - (times[c][later[0]] - times[c][later[0] - 1]))
+            if later:  # never past the curve's limit
+                move = min(move, _limit(c) - times[c][-1])
+        for c in names:
+            times[c] = [x + move if x >= at else x for x in times[c]]
+        moved += move
+    return times
+
+
+EVENT_MS = Decimal("1.0")  # rises this close belong to one event of a take's timing
+_TAKE_DRAWS = 1 + 9 * MAX_KNOTS  # a strength, and a move for every event, at most one per rise of every shape
+
+
+def _limit(curve: str) -> Decimal:
+    """Return how late a curve's last knot may be: 2 s for the body and the rims, 1 s for the noise's."""
+    return Decimal(repr(MAX_BODY_MS if curve.startswith(("body", "rim")) else MAX_NOISE_MS))
