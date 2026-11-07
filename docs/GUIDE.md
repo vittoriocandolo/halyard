@@ -158,7 +158,7 @@ drive**: a layer at −6 dB with 24 dB of drive saturates like one at 0 dB with
 
 | Field | Values | What it does |
 |---|---|---|
-| `sample_rate` | 44100, 48000, 88200, 96000 | The file's rate. The 96 kHz file is exactly the 48 kHz one with samples filled in. |
+| `sample_rate` | 44100, 48000, 88200, 96000, 176400, 192000 | The file's rate. The 96 and 192 kHz files are exactly the 48 kHz one with samples filled in. |
 | `format` | `float32`, `pcm24`, `pcm16` | PCM uses the plain PCM tag that hardware samplers read, with seeded triangular dither that leaves exact zeros alone. |
 | `mode` | `gain`, `peak`, `true-peak` | Apply `db` as a gain, or scale so the sample peak, or the true peak, is at `db` dBFS. |
 | `db` | gain −60 – +24; peak −60 – 0 | See `mode`. |

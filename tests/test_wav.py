@@ -18,7 +18,7 @@ from numpy.typing import NDArray
 from scipy.io import wavfile
 
 from halyard_synth import __version__, cli, noise, render, wav
-from halyard_synth.patch import Patch, dumps, loads
+from halyard_synth.patch import SAMPLE_RATES, Patch, dumps, loads
 
 from .conftest import EXAMPLE, make
 
@@ -231,7 +231,7 @@ def test_reads_beds_and_samples_but_rejects_other_formats(tmp_path: Path) -> Non
 
 def test_every_rate_writes_a_valid_file(tmp_path: Path) -> None:
     """Write a file at every rate that soundfile reads back exactly."""
-    for rate in (44100, 48000, 88200, 96000):
+    for rate in SAMPLE_RATES:
         path = tmp_path / f"{rate}.wav"
         audio, _ = export(path, make(**{"output.sample_rate": rate}))
         data, sr = soundfile.read(path, dtype="float32")

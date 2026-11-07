@@ -89,23 +89,29 @@ def test_timing_contract_on_synthetic_input() -> None:
         assert (out.size - 1) * factor - (count - 1) <= length - 1
 
 
-@pytest.mark.parametrize(("low", "high"), [(48000, 96000), (44100, 88200)])
-def test_double_rate_is_the_base_rate_with_samples_filled_in(low: int, high: int) -> None:
-    """Render at 96 and 88.2 kHz and find the 48 and 44.1 kHz renders as every other sample, bit for bit."""
+@pytest.mark.parametrize(
+    ("low", "high"),
+    [(48000, 96000), (44100, 88200), (48000, 192000), (44100, 176400)],
+)
+def test_higher_rates_are_the_base_rate_with_samples_filled_in(low: int, high: int) -> None:
+    """Render at 2× and 4× the base rate and find the base rate's render as every 2nd or 4th sample, bit for bit."""
     edits = {"drive.db": 12.0, "noise[2].rattle": 0.7}
     a, _ = render.render(make(**edits, **{"output.sample_rate": low}))
     b, _ = render.render(make(**edits, **{"output.sample_rate": high}))
-    assert a.size == (b.size + 1) // 2
-    assert np.array_equal(b[::2], a)
+    step = high // low
+    assert a.size == (b.size + step - 1) // step
+    assert np.array_equal(b[::step], a)
 
 
 def test_rates() -> None:
-    """Find each export rate's internal rate and factor: K = 32 × the base, and half the factor at 2×."""
+    """Find each export rate's internal rate and factor: K = 32 × the base, a half and a quarter of it at 2× and 4×."""
     assert render.rates(48000)[0] == render.K * 48000
     assert render.rates(44100) == (1411200, 32)
     assert render.rates(88200) == (1411200, 16)
     assert render.rates(48000) == (1536000, 32)
     assert render.rates(96000) == (1536000, 16)
+    assert render.rates(176400) == (1411200, 8)
+    assert render.rates(192000) == (1536000, 8)
     assert render.rates(48000, 16) == (768000, 16)
 
 

@@ -38,7 +38,7 @@ type Knots = tuple[tuple[float, float], ...]  # (ms, value) pairs, or (ratio, le
 
 INSTRUMENT = "snare"
 SCHEMA = 1
-SAMPLE_RATES = (44100, 48000, 88200, 96000)
+SAMPLE_RATES = (44100, 48000, 88200, 96000, 176400, 192000)
 FORMATS = ("float32", "pcm24", "pcm16")
 MODES = ("gain", "peak", "true-peak")  # the output's gain, or a target for the sample peak or the true peak
 MAX_BODY_MS = 2000.0

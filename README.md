@@ -181,7 +181,7 @@ The valid domain:
 | knots per curve | pitch 2 – 32, amplitude 3 – 32 |
 | knot spacing | ≥ 10 µs (compared on the decimal values as written) |
 | body curves / noise curves | end by 2 s / by 1 s |
-| output | 44.1, 48, 88.2 or 96 kHz; float32, pcm24 or pcm16; gain −60 – +24 dB; sample or true peak target −60 – 0 dBFS |
+| output | 44.1, 48, 88.2, 96, 176.4 or 192 kHz; float32, pcm24 or pcm16; gain −60 – +24 dB; sample or true peak target −60 – 0 dBFS |
 | `seed` | 0 – 2⁶³ − 1, takes included |
 | rims | 0 – 2, each 1 – 8 modes in 100 Hz – 20 kHz, strictly increasing, the loudest exactly 0 dB; `damping` 0 – 3, the highest mode decaying at most 512 times faster than the first; shape by 2 s |
 | brush | 0 – 1; a layer's fields, its shape by 1 s; `sweep` 2 – 32 knots by 1 s, ratios 0.5 – 2 and an octave apart at most, both band edges within 20 Hz – 20 kHz |
@@ -211,8 +211,9 @@ spreads over more than 1 dB. GUIDE.md explains every line.
 
 - **Rates.** The internal rate is 32× the base rate: 1.4112 MHz for the
   44.1 kHz family, 1.536 MHz for 48 kHz. The 88.2 and 96 kHz exports reuse
-  their family's rate and filter with factor 16, so a 96 kHz file equals the
-  48 kHz file with the in-between samples filled in, bit for bit.
+  their family's rate and filter with factor 16, and 176.4 and 192 kHz with
+  factor 8, so a 96 or 192 kHz file equals the 48 kHz file with the
+  in-between samples filled in, bit for bit.
 - **Decimator.** One frozen minimum-phase FIR per family, passing 0–20 kHz
   within 0.001 dB and attenuating at least 110 dB from base/2 up. It ships
   as data with a SHA-256 checksum, so the sound cannot drift with SciPy

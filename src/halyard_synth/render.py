@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     type Floats = NDArray[np.float64]
 
 K = 32  # frozen by the adversarial grid: at 16× the crack reference keeps only 1.7 dB of drive headroom (plan §3)
-FAMILY = {44100: 44100, 88200: 44100, 48000: 48000, 96000: 48000}
+FAMILY = {44100: 44100, 88200: 44100, 176400: 44100, 48000: 48000, 96000: 48000, 192000: 48000}
 
 # The validated domain (plan §5). The predicted aliasing error at unity gain is
 #     SATURATION · exp(−π² / q) · P  +  the kink bound

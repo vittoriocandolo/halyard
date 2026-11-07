@@ -501,7 +501,7 @@ def _seeds(add: Add, out: list[Fixture]) -> None:
 
 def _rates(add: Add) -> None:
     """Add the export rates, which share their family's internal rate."""
-    for rate in (44100, 88200, 96000):
+    for rate in (44100, 88200, 96000, 176400, 192000):
         for drive in (0, 24, 36):
             add("rates", f"sr{rate}-d{drive}", **{"output.sample_rate": rate, "drive.db": float(drive)})
             add(

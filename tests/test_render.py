@@ -13,7 +13,7 @@ from scipy.signal import fftconvolve
 
 from halyard_synth import cli, render, voice
 from halyard_synth.loudness import momentary_max
-from halyard_synth.patch import loads
+from halyard_synth.patch import SAMPLE_RATES, loads
 
 from .conftest import EXAMPLE, make
 
@@ -49,7 +49,7 @@ HOT = {"noise[2].level_db": 6.0, "drive.db": 24.0}
 
 def test_output_length_follows_the_timing_contract() -> None:
     """Find N internal samples and (N + L − 2) / factor + 1 outputs at every rate, the first exactly 0."""
-    for rate in (44100, 48000, 88200, 96000):
+    for rate in SAMPLE_RATES:
         p = make(**{"output.sample_rate": rate})
         s = render.synthesize(p)
         internal, factor = render.rates(rate)

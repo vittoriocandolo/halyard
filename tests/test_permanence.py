@@ -51,4 +51,4 @@ def test_the_rendering_constants() -> None:
     """Find the noise's components, the internal rate's factor, the families, the block and the brush's steps."""
     found = {"components": noise.COMPONENTS, "K": render.K, "block": voice.BLOCK, "steps": voice.STEPS}
     assert found == FROZEN
-    assert render.FAMILY == {44100: 44100, 88200: 44100, 48000: 48000, 96000: 48000}
+    assert render.FAMILY == {44100: 44100, 88200: 44100, 176400: 44100, 48000: 48000, 96000: 48000, 192000: 48000}

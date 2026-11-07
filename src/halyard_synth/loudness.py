@@ -7,7 +7,11 @@ K-weighting is a high shelf of about +4 dB above 1.7 kHz followed by a
 high-pass at about 38 Hz. The standard publishes both biquads at 48 kHz only.
 The analog parameters below (as derived for libebur128) reproduce those
 coefficients, and the bilinear transform with pre-warping gives the same
-filters at every other rate.
+filters at every other rate. The standard's high-pass has the numerator
+1, −2, 1, whose passband gain, 1 + k/Q + k², depends on the rate: +0.043 dB
+at 48 kHz, +0.011 dB at 192 kHz. Its numerator is scaled at every rate to the
+48 kHz filter's passband gain, so a sound reads the same loudness at every
+rate, and at 48 kHz the filter is the standard's exactly.
 
 The momentary loudness is −0.691 + 10·log₁₀ of the mean square of the
 K-weighted signal over 400 ms (one channel, weight 1). For a one-shot the
@@ -35,6 +39,15 @@ WINDOW_S = 0.4
 OFFSET = -0.691
 
 
+STANDARD_RATE = 48000  # where BS.1770 publishes the coefficients
+
+
+def _passband(rate: int) -> float:
+    """Return the passband gain of the standard's high-pass, numerator 1, −2, 1, at `rate`: 1 + k/Q + k²."""
+    k = math.tan(math.pi * HIGHPASS_HZ / rate)
+    return 1.0 + k / HIGHPASS_Q + k * k
+
+
 def k_weighting(rate: int) -> Floats:
     """Return the two K-weighting biquads at `rate`, as second-order sections."""
     k = math.tan(math.pi * SHELF_HZ / rate)
@@ -51,7 +64,8 @@ def k_weighting(rate: int) -> Floats:
     ]
     k = math.tan(math.pi * HIGHPASS_HZ / rate)
     a0 = 1.0 + k / HIGHPASS_Q + k * k
-    highpass = [1.0, -2.0, 1.0, 1.0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / HIGHPASS_Q + k * k) / a0]
+    g = _passband(STANDARD_RATE) / a0  # the passband gain is a0; 1 at the standard's rate
+    highpass = [g, -2.0 * g, g, 1.0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / HIGHPASS_Q + k * k) / a0]
     return np.array([shelf, highpass])
 
 

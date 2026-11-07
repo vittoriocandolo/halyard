@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 HIT_S, LONG_S, PACK_S, MEMORY_MIB = 0.3, 1.5, 15.0, 300
-RATES = (44100, 48000, 88200, 96000)
+RATES = (44100, 48000, 88200, 96000, 176400, 192000)
 REPEAT = 3  # seeds per case; the fastest counts
 KIB = 1024  # ru_maxrss is in KiB on Linux
 
