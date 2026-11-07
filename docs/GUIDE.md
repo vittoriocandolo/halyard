@@ -380,6 +380,34 @@ range of each layer is in the pack report.
 and keep one gain per kit, as `pack` does, so its layers keep their natural
 levels.
 
+**With Ballast and Brightwork.** The references sit at −27 LUFS so they
+compare fairly with each other, which leaves them some 18 dB under Ballast's
+kicks, which peak at −1 dBTP. For a working balance, set the kick's
+`output.db` to −10 and raise each reference's `output.db` by the amount below:
+in a groove at the genre's tempo, the snare or clap on two and four then reads
+5 dB under the kick by loudness, Brightwork's hats, raised as its guide says,
+10 dB under, and no file peaks above −1 dBFS. Each was measured against the
+Ballast preset of its genre; it is a starting balance, and your ears and the
+track decide the rest.
+
+| Reference | Against Ballast's | Raise `output.db` by | Note |
+|---|---|---|---|
+| `tone` | `house` | +4.8 dB | |
+| `crack` | `house` | +4.7 dB | |
+| `fat` | `house` | +4.8 dB | |
+| `driven` | `house` | +4.8 dB | |
+| `clap` | `house` | +4.8 dB | |
+| `snap` | `house` | +1.0 dB | 3.7 dB short, held at −1 dBFS by its peak |
+| `machine` | `house` | +4.6 dB | 0.1 dB short, held at −1 dBFS by its peak |
+| `house` | `house` | +4.8 dB | |
+| `short-clap` | `tech-house` | +3.8 dB | |
+| `rim-click` | `tech-house` | +3.8 dB | |
+| `big-clap` | `trance` | +3.4 dB | |
+| `long-snare` | `trance` | +3.5 dB | |
+| `rimshot` | `house` | +4.8 dB | |
+| `cross-stick` | `house` | +4.8 dB | |
+| `brush` | `house` | +4.8 dB | |
+
 ## From Python
 
 Everything the commands do is a function of the package, `halyard_synth`.
