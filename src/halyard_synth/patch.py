@@ -1215,43 +1215,112 @@ def _struck_glide(pitch: Knots, v: float, glide: float) -> Knots:
 def flam(p: Patch, gap_ms: float, grace_db: float = 12.0, glide: float = 2.0, contact: float = 0.2) -> Patch:
     """Return the drum struck twice: a grace note `grace_db` softer, then the main stroke `gap_ms` later.
 
-    The grace note is `softer(p, grace_db)` with its level in its shapes, so the
-    drive still sees it softer. Every shape is the grace's up to the main
-    stroke's first knot, moved `gap_ms` later, where it takes the grace's value
-    and goes on as the main stroke's. The pitch curve is the grace's up to
-    `gap_ms`, then the main stroke's, moved to start at the main body's peak,
-    since the glide follows the head's motion. Band edges and the brush's
-    sweep are shared; the grace's higher modes decay as its fundamental does,
-    the decay compressing from the main peak on. Times are written to 1 µs,
-    gains and ratios to 6 decimals.
+    Two strokes, as `strokes` writes them: the grace is the drum struck softer by
+    softer's rules, its level in its shapes so the drive still hears it softer.
     """
     for name, x, ok in (("--gap", gap_ms, gap_ms > 0), ("--grace", grace_db, grace_db > 0)):
         if not (math.isfinite(x) and ok):
             raise PatchError([f"{name}: must be a positive number, found {x!r}"])
-    v = 10 ** (-grace_db / 20)
-    scale = Decimal(repr(v))
-    if round(scale, 6) >= 1:
-        raise PatchError([f"--grace: {grace_db!r} dB is too small for the grace to stay softer, written to 6 decimals"])
-    gap = _dec(gap_ms)
+    return strokes(p, [(0.0, grace_db), (gap_ms, 0.0)], glide, contact, name="--grace")
+
+
+MIN_STROKES, MAX_STROKES = 2, 16  # a roll's strokes; the 32 knots of a shape usually end it first
+
+
+@dataclass(frozen=True)
+class Roll:
+    """A roll or a build: how many strokes, their spacing and its growth, and how much softer the first is."""
+
+    count: int
+    spacing: float  # ms, from the first stroke to the second
+    growth: float = 1.0  # each gap over the one before: below 1 the roll speeds up
+    crescendo: float = 0.0  # dB softer the first stroke is than the last, the strokes between in even steps
+
+
+def roll(p: Patch, r: Roll, glide: float = 2.0, contact: float = 0.2) -> Patch:
+    """Return the drum struck `r.count` times, a roll or a build, as `strokes` writes it, by softer's rules."""
+    problems = _Problems()
+    count: object = r.count
+    if isinstance(count, bool) or not isinstance(count, int) or not MIN_STROKES <= count <= MAX_STROKES:
+        problems.add("--count", f"needs {MIN_STROKES} to {MAX_STROKES} strokes, found {count!r}")
+    for name, value, ok in (
+        ("--spacing", r.spacing, r.spacing > 0),
+        ("--growth", r.growth, r.growth > 0),
+        ("--crescendo", r.crescendo, r.crescendo >= 0),
+    ):
+        if not (math.isfinite(value) and ok):
+            problems.add(name, f"{value!r} is out of range")
+    if problems:
+        raise PatchError(problems)
+    starts, gap, at = [], _dec(r.spacing), Decimal(0)
+    for _ in range(r.count):
+        starts.append(at)
+        at, gap = at + gap, gap * Decimal(repr(float(r.growth)))
+    levels = [r.crescendo * (1 - k / (r.count - 1)) for k in range(r.count)]
+    return strokes(p, [(float(_ms(t)), db) for t, db in zip(starts, levels, strict=True)], glide, contact)
+
+
+def strokes(
+    p: Patch,
+    hits: Sequence[tuple[float, float]],
+    glide: float = 2.0,
+    contact: float = 0.2,
+    *,
+    name: str = "--crescendo",
+) -> Patch:
+    """Return the drum struck at each (start in ms, dB softer) of `hits`, as ordinary knots.
+
+    The first stroke starts at 0 ms and the loudest is 0 dB softer. Each stroke
+    is the drum struck that much softer by softer's rules, its rises and glide,
+    with its level written into its shapes so the drive hears it softer; the
+    bands and the brush's sweep are shared. Every shape is each stroke's in
+    turn: one stroke's until the next stroke's first knot, where it takes the
+    previous stroke's value and goes on as the next. The pitch curve restarts at
+    each stroke's start and reaches its glide at the body's peak, since the
+    glide follows the head's motion. The decay compresses from the shape's
+    first knot at gain 1, the first of the loudest strokes, so a softer stroke
+    before it rings its higher modes as long as its fundamental. Times are
+    written to 1 µs, gains and ratios to 6 decimals; it fails rather than drop
+    knots.
+    """
+    levels = [10 ** (-db / 20) for _, db in hits]
+    for (_, db), v in zip(hits, levels, strict=True):
+        if db and round(Decimal(repr(v)), 6) >= 1:
+            raise PatchError([f"{name}: {db!r} dB is too small for a stroke to stay softer, written to 6 decimals"])
+    starts = [_dec(t) for t, _ in hits]
+
+    def stroke(knots: Knots, k: int) -> list[tuple[float, float]]:
+        """Return stroke k's shape, softer by its dB, from its own start."""
+        if not hits[k][1]:
+            return list(knots)
+        scale = Decimal(repr(levels[k]))
+        return [(ms, float(round(_dec(g) * scale, 6))) for ms, g in _struck_rises(knots, levels[k], contact)]
 
     def joined(path: str) -> Knots:
         main = curve_knots(p, path)
-        # Only the grace's shapes and glide are softer's: its levels are written into its shapes, and the bands
-        # are the main stroke's, so no softer patch is built or checked.
-        knots = [(ms, float(round(_dec(g) * scale, 6))) for ms, g in _struck_rises(main, v, contact)]
-        start = _dec(main[0][0]) + gap
-        curve = amplitude_curve([ms / 1000 for ms, _ in knots], [g for _, g in knots])
-        residual = float(round(Decimal(repr(float(curve(float(start) / 1000)))), 6))
-        before = [k for k in knots if _dec(k[0]) <= start - MIN_SPACING_MS]
-        return (*before, (_ms(start), residual), *((_ms(_dec(ms) + gap), g) for ms, g in main[1:]))
+        out = stroke(main, 0)
+        previous = out
+        for k in range(1, len(hits)):
+            start = _dec(main[0][0]) + starts[k]
+            curve = amplitude_curve([ms / 1000 for ms, _ in previous], [g for _, g in previous])
+            residual = float(round(Decimal(repr(float(curve(float(start) / 1000)))), 6))
+            mine = [(_ms(_dec(ms) + starts[k]), g) for ms, g in stroke(main, k)]
+            out = [*(kn for kn in out if _dec(kn[0]) <= start - MIN_SPACING_MS), (_ms(start), residual), *mine[1:]]
+            previous = mine
+        return tuple(out)
 
     peak = _dec(next(ms for ms, g in p.body.amp if g == 1.0))
-    played = _struck_glide(p.body.pitch, v, glide)
-    glided = pitch_curve([ms / 1000 for ms, _ in played], [r for _, r in played])
-    pitch = (
-        *(k for k in played if _dec(k[0]) <= gap - MIN_SPACING_MS),
-        (_ms(gap), float(round(Decimal(repr(float(glided(float(gap) / 1000)))), 6))),
-        *((_ms(_dec(ms) + gap + peak), r) for ms, r in p.body.pitch),
-    )
-    curves = {name: joined(name) for name in curve_names(p) if name.endswith(".amp")}
-    return _set_curves(p, {**curves, "body.pitch": pitch})
+    glided = [
+        p.body.pitch if not db else _struck_glide(p.body.pitch, v, glide)
+        for (_, db), v in zip(hits, levels, strict=True)
+    ]
+    pitch = list(glided[0])
+    previous = pitch
+    for k in range(1, len(hits)):
+        curve = pitch_curve([ms / 1000 for ms, _ in previous], [r for _, r in previous])
+        residual = float(round(Decimal(repr(float(curve(float(starts[k]) / 1000)))), 6))
+        mine = [(_ms(_dec(ms) + starts[k] + peak), r) for ms, r in glided[k]]
+        pitch = [*(kn for kn in pitch if _dec(kn[0]) <= starts[k] - MIN_SPACING_MS), (_ms(starts[k]), residual), *mine]
+        previous = mine
+    curves = {c: joined(c) for c in curve_names(p) if c.endswith(".amp")}
+    return _set_curves(p, {**curves, "body.pitch": tuple(pitch)})

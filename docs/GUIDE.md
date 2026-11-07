@@ -230,6 +230,15 @@ fail, and say why, rather than clamp.
   32 or run past its limit.
 
   ![The tone reference as a flam: a grace note 12 dB softer, then the main stroke 25 ms later](figures/flam.svg)
+- **`halyard roll PATCH --count N --spacing MS [--growth G] [--crescendo DB]`**
+  strikes the drum N times, as `flam` strikes it twice: each gap is `--growth`
+  times the one before (below 1, the roll speeds up into a build), and the
+  first stroke is `--crescendo` dB softer than the last, the strokes between in
+  even steps, each by `softer`'s rules. Every shape takes a stroke's knots in
+  turn, so a stroke costs a shape as many knots as it has before the next
+  stroke: a snare's five-knot stick allows about six strokes, a clap's train
+  two, and the noise's second ends a long roll. It fails, naming the shape,
+  rather than drop knots.
 
 ## Recipes
 

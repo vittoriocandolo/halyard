@@ -1193,3 +1193,50 @@ def test_a_rim_decays_no_faster_than_the_body_may(example_dict: dict[str, Any]) 
     wider = dict(wide, modes=[{"hz": 1000, "level_db": 0}, {"hz": 8100, "level_db": -3}])
     found = problems(from_dict, dict(example_dict, rim=[wider]))
     assert found[0].startswith("rim[1].damping: its highest mode would decay 531.4 times faster than its first")
+
+
+# Rolls.
+
+
+def test_a_roll_strikes_the_drum_in_turn_louder_to_its_last() -> None:
+    """Find each stroke's peak at its level on its start, and from the last stroke's peak on the drum itself."""
+    p = loads(EXAMPLE)
+    r = patch.Roll(4, 60.0, 1.0, 9.0)
+    q = patch.roll(p, r)
+    starts = [0.0, 60.0, 120.0, 180.0]
+    gains = [g for _, g in q.body.amp]
+    peaks = [gains[i] for i in range(1, len(gains) - 1) if gains[i - 1] < gains[i] > gains[i + 1]]
+    assert peaks == [round(10 ** (-db / 20), 6) for db in (9.0, 6.0, 3.0, 0.0)]  # a peak per stroke, louder in turn
+    last = starts[-1]
+    tail = [(round(ms - last, 6), g) for ms, g in q.body.amp if ms > last + p.body.amp[1][0] - ROLL_US]
+    assert tail == [(round(ms, 6), g) for ms, g in p.body.amp[1:]]
+    assert q.body.pitch[-len(p.body.pitch) :] == tuple(
+        (ms + last + p.body.amp[1][0], ratio) for ms, ratio in p.body.pitch
+    )
+
+
+def test_a_roll_speeds_up_and_two_equal_strokes_are_a_flam_of_none() -> None:
+    """Grow each gap by `growth`, and find a flam the roll of its grace and main stroke."""
+    p = loads(EXAMPLE)
+    q = patch.roll(p, patch.Roll(3, 100.0, 0.5))
+    assert [ms for ms, g in q.body.amp if g == 1.0] == [0.4, 100.4, 150.4]  # gaps of 100 and 50 ms
+    assert patch.strokes(p, [(0.0, 12.0), (25.0, 0.0)]) == patch.flam(p, 25.0)
+
+
+def test_roll_failures() -> None:
+    """Refuse a count, spacing, growth or crescendo out of range, and a roll a shape cannot hold, naming it."""
+    p = loads(EXAMPLE)
+    for r, name in (
+        (patch.Roll(1, 60.0), "--count"),
+        (patch.Roll(17, 60.0), "--count"),
+        (patch.Roll(4, 0.0), "--spacing"),
+        (patch.Roll(4, 60.0, -1.0), "--growth"),
+        (patch.Roll(4, 60.0, 1.0, -3.0), "--crescendo"),
+        (patch.Roll(4, 60.0, 1.0, 1e-7), "--crescendo"),
+    ):
+        with pytest.raises(PatchError, match=name):
+            patch.roll(p, r)
+    assert any(m.startswith("noise[1].amp: needs 3 to 32 knots") for m in problems(patch.roll, p, patch.Roll(8, 60.0)))
+
+
+ROLL_US = 0.0005  # a knot's time, written to 1 µs

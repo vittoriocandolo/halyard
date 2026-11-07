@@ -53,6 +53,7 @@ halyard bursts clap.toml 'noise[1]' --count 4 --spacing 11 > clap-4.toml   # a c
 halyard softer snare.toml 12 > snare-12.toml             # the same drum struck 12 dB softer
 halyard softer snare.toml 24 > snare-24.toml
 halyard flam snare.toml --gap 25 > flam.toml             # a grace note 12 dB softer, 25 ms ahead
+halyard roll snare.toml --count 4 --spacing 60 --crescendo 9 > roll.toml   # four strokes, louder to the last
 halyard pack snare.toml snare-12.toml snare-24.toml --takes 6 --out kit/
 ```
 

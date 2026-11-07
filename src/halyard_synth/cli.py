@@ -3,7 +3,7 @@
 
 """Command line (plan §7.6): halyard init | render | verify | extract | audition | pack.
 
-The editing commands, tune | stretch | bursts | softer | flam, print a complete, canonical patch.
+The editing commands, tune | stretch | bursts | softer | flam | roll, print a complete, canonical patch.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from . import __version__, wav
 from .audition import Settings, audition
 from .pack import Options, pack
-from .patch import Patch, PatchError, Train, bursts, dumps, flam, load, loads, softer, stretch, tune
+from .patch import Patch, PatchError, Roll, Train, bursts, dumps, flam, load, loads, roll, softer, stretch, tune
 from .reference import verify
 from .render import FORMATS, RenderError, db, export, render_takes
 
@@ -124,6 +124,12 @@ def cmd_bursts(args: argparse.Namespace) -> int:
 def cmd_softer(args: argparse.Namespace) -> int:
     """Print the same drum struck softer."""
     return _edit(args.patch, f"make it {args.db:g} dB softer", softer, args.db, args.glide, args.contact)
+
+
+def cmd_roll(args: argparse.Namespace) -> int:
+    """Print the drum struck several times: a roll or a build."""
+    r = Roll(args.count, args.spacing, args.growth, args.crescendo)
+    return _edit(args.patch, f"write a roll of {args.count} strokes", roll, r, args.glide, args.contact)
 
 
 def cmd_flam(args: argparse.Namespace) -> int:
@@ -321,6 +327,32 @@ def _edit_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> 
         help="the grace's contact exponent, as softer's (default 0.2)",
     )
     p.set_defaults(run=cmd_flam)
+
+    p = sub.add_parser("roll", help="print the drum struck several times: a roll or a build, as ordinary knots")
+    p.add_argument("patch")
+    p.add_argument("--count", type=int, required=True, help="strokes, 2 to 16, as the 32 knots of a shape allow")
+    p.add_argument("--spacing", type=_finite, required=True, metavar="MS", help="from the first stroke to the second")
+    p.add_argument(
+        "--growth",
+        type=_finite,
+        default=1.0,
+        help="each gap over the one before; below 1 speeds up (default 1)",
+    )
+    p.add_argument(
+        "--crescendo",
+        type=_finite,
+        default=0.0,
+        metavar="DB",
+        help="how much softer the first stroke (default 0)",
+    )
+    p.add_argument(
+        "--glide",
+        type=_finite,
+        default=2.0,
+        help="the softer strokes' glide exponent, as softer's (default 2)",
+    )
+    p.add_argument("--contact", type=_finite, default=0.2, help="their contact exponent, as softer's (default 0.2)")
+    p.set_defaults(run=cmd_roll)
 
 
 def _play_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

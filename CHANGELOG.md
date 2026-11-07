@@ -41,8 +41,9 @@ The first public release.
   problem reported with its field path, and a canonical form.
 - Editing commands that print a complete patch: `tune` to a note or a
   frequency, `stretch` of chosen curves, `bursts` that write a clap train as
-  ordinary knots, `softer`, the same drum struck softer, and `flam`, a
-  softer grace note before the main stroke, also as ordinary knots.
+  ordinary knots, `softer`, the same drum struck softer, `flam`, a softer
+  grace note before the main stroke, and `roll`, the drum struck in turn with
+  a crescendo and a speeding up, also as ordinary knots.
 - Exports at 44.1, 48, 88.2, 96, 176.4 and 192 kHz, as float32 or as 24- or
   16-bit PCM with seeded TPDF dither, at a gain, a sample peak or a true peak, with the
   root key in a `smpl` chunk and the patch and its provenance in a `snar`

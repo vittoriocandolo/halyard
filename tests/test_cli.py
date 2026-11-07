@@ -343,3 +343,16 @@ def test_flam(capsys: pytest.CaptureFixture[str], example: Path) -> None:
 
 
 FLAM_GAP_MS = 25.0
+
+
+def test_roll(capsys: pytest.CaptureFixture[str], example: Path) -> None:
+    """Print a roll, and refuse one a shape cannot hold, saying which."""
+    code, out, _ = run(capsys, "roll", example, "--count", 3, "--spacing", 80, "--crescendo", 6)
+    assert code == 0
+    assert loads(out).body.amp[-1][0] == loads(EXAMPLE).body.amp[-1][0] + ROLL_LAST_MS
+    code, _, err = run(capsys, "roll", example, "--count", 9, "--spacing", 60)
+    assert code == BAD_INPUT
+    assert "noise[1].amp" in err
+
+
+ROLL_LAST_MS = 160.0  # the third stroke of 80 ms gaps
