@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
 RATE = 48000
 SPACING_S = 0.5  # from one note to the next
-LENGTH_S = 0.4  # each note's length
+LENGTH_S = 0.01  # each note's length: as short as a programmed hit, so a player that cut it would fail
 VELOCITIES = (127, 110, 96, 80, 64, 48, 32, 20)  # every layer, each layer's top and bottom nearby
 REPEATS = 3  # each velocity played as often as there are takes, so the round robins cycle
 TAKES = 3

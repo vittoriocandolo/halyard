@@ -341,7 +341,8 @@ N takes (take j of a layer plays its seed + j − 1).
   each layer sits where the law reaches its loudness relative to the loudest,
   neighbours meet halfway in dB, and each layer's group carries a curve point
   at every velocity in its range, so the level follows the law across layer
-  boundaries. Takes cycle in sequence; the drum never transposes. The key
+  boundaries. Takes cycle in sequence; the drum never transposes, and it plays
+  out as a one-shot whatever the note's length, so a short note never cuts it. The key
   defaults to 38, the General MIDI snare, or 39, the hand clap, when no layer
   has a body.
 - The pack report lists each layer's loudness, velocity range, take spread and

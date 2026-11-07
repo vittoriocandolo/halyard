@@ -357,7 +357,12 @@ four layers of `fat` with 16 takes from 1.47–1.66 s to 1.37–1.40 s.
 
 `tools/sfz_players.py` writes a pack of the crack reference struck 0, 12 and
 24 dB softer, three takes each, and 24 notes: eight velocities across all
-three layers, each played three times so the round robins cycle.
+three layers, each played three times so the round robins cycle, and each
+held only 10 ms, as a programmed hit often is. A pack's map makes every hit a
+one-shot (`loop_mode=one_shot`); without it both players released the sample
+at the note's end, cutting a clap of 220 ms to 15 ms in sfizz and 37 ms in
+liquidsfz, which a kit played with Ballast's kicks and Brightwork's hats
+showed.
 `tools/sfz_players.sh` builds sfizz 1.2.3 (`sfizz_render`) and liquidsfz 0.4.1
 (through `tools/liquidsfz_render.cc`, since liquidsfz ships only real-time
 clients) from source in a throwaway Debian 13 container, renders the notes

@@ -108,6 +108,7 @@ def test_every_velocity_and_take_maps_to_exactly_one_file(built: pack.Pack, tmp_
     rs = regions(text)
     assert len(rs) == LAYERS * TAKES
     assert all(r["key"] == str(SNARE) and r["pitch_keytrack"] == "0" for r in rs)
+    assert all(r["loop_mode"] == "one_shot" for r in rs)  # a short note never cuts the drum
     for v in range(1, 128):
         for position in (1, 2, 3):
             hits = [r for r in rs if int(r["lovel"]) <= v <= int(r["hivel"]) and int(r["seq_position"]) == position]

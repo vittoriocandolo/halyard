@@ -169,6 +169,7 @@ class Pack:
             f"key={self.key}",
             "pitch_keytrack=0",
             "amp_veltrack=100",
+            "loop_mode=one_shot",  # a drum plays out whatever the note's length, as a drum machine's does
         ]
         for layer in self.layers:
             lines += [
