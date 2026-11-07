@@ -141,11 +141,11 @@ The priority order stays Correctness → Minimalism → Elegance.
 
 The whole instrument fits in three lines:
 
-$$x(t)=b(t)+\sum_{j=1}^{J}w_j(t),\qquad y(t)=S_\alpha\big(x(t)\big),\qquad \mathrm{out}[m]=p\,g_{\mathrm{out}}\sum_{k=0}^{L-1}h[k]\,y\!\left(\tfrac{mK-k}{F}\right)$$
+$$x(t)=b(t)+\sum_{j=1}^{J}w_j(t)+\sum_{k}c_k(t)+v(t),\qquad y(t)=S_\alpha\big(x(t)\big),\qquad \mathrm{out}[m]=p\,g_{\mathrm{out}}\sum_{k=0}^{L-1}h[k]\,y\!\left(\tfrac{mK-k}{F}\right)$$
 
 The symbols are the kick's:
 
-- b is the body and w_j the noise layers, J ≤ 4.
+- b is the body and w_j the noise layers, J ≤ 4; since revision 5, c_k are the rims, up to two, and v the brush, if any (§2.3, §2.4).
 - S_α is the saturator.
 - h is the frozen decimator, of length L.
 - F is the internal rate and K the decimation factor.

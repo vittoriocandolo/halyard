@@ -17,7 +17,8 @@ filter. Each render states whether its aliasing is demonstrated below
 leave that domain.
 
 The user guide is [docs/GUIDE.md](docs/GUIDE.md): the workflow, every
-control, recipes and how to read the report. Hear the fifteen references,
+control, recipes and how to read the report. How the instrument is made, and
+what it promises, is [docs/DESIGN.md](docs/DESIGN.md). Hear the fifteen references,
 with their figures, reports and patches, in
 [docs/references.md](docs/references.md).
 
