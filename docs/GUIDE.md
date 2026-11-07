@@ -230,6 +230,13 @@ fail, and say why, rather than clamp.
   32 or run past its limit.
 
   ![The tone reference as a flam: a grace note 12 dB softer, then the main stroke 25 ms later](figures/flam.svg)
+- **`halyard stack PATCH OTHER [--db DB]`** writes one patch that sounds
+  both, such as a snare with a clap layered over it, through one drive: the
+  layers, rims and brushes of both, within a patch's limits, OTHER's `--db`
+  louder. The body is the one that sounds, and two sounding bodies are
+  refused, since a patch is one drum's head; the drive, the output and the
+  seed are PATCH's, so OTHER's noise is redrawn for PATCH's seed. Without
+  drive, a stack renders exactly as the two hits added.
 - **`halyard roll PATCH --count N --spacing MS [--growth G] [--crescendo DB]`**
   strikes the drum N times, as `flam` strikes it twice: each gap is `--growth`
   times the one before (below 1, the roll speeds up into a build), and the

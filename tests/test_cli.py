@@ -356,3 +356,17 @@ def test_roll(capsys: pytest.CaptureFixture[str], example: Path) -> None:
 
 
 ROLL_LAST_MS = 160.0  # the third stroke of 80 ms gaps
+
+
+def test_stack(capsys: pytest.CaptureFixture[str], example: Path, tmp_path: Path) -> None:
+    """Print a snare and a clap as one patch, and refuse a stack of two bodies or of a file that is no patch."""
+    clap = tmp_path / "clap.toml"
+    clap.write_text(cli.reference_text("clap"), encoding="utf-8")
+    code, out, _ = run(capsys, "stack", example, clap, "--db", -4)
+    assert code == 0
+    assert len(loads(out).noise) == len(loads(EXAMPLE).noise) + len(loads(cli.reference_text("clap")).noise)
+    code, _, err = run(capsys, "stack", example, example)
+    assert code == BAD_INPUT
+    assert "both patches have a sounding body" in err
+    code, _, err = run(capsys, "stack", example, tmp_path / "missing.toml")
+    assert code == BAD_INPUT

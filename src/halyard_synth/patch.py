@@ -1324,3 +1324,38 @@ def strokes(
         previous = mine
     curves = {c: joined(c) for c in curve_names(p) if c.endswith(".amp")}
     return _set_curves(p, {**curves, "body.pitch": tuple(pitch)})
+
+
+def stack(a: Patch, b: Patch, db: float = 0.0) -> Patch:
+    """Return one patch that sounds both: `a` and `b`, its sources `db` louder, through one drive.
+
+    The layers, rims and brushes of both are kept, a's first, within the limits
+    of a patch; the body is the one that sounds, and two sounding bodies are
+    refused, since a patch is one drum's head. The drive, the output and the
+    seed are a's, so b's noise is the same noise in its own bands, drawn for
+    a's seed, and its layers' rattle follows the body the stack keeps. Levels
+    are written to 6 decimals.
+    """
+    if not math.isfinite(db):
+        raise PatchError([f"--db: must be a finite number, found {db!r}"])
+    louder = Decimal(repr(float(db)))
+
+    def level(x: float) -> float:
+        """Raise one of b's levels by db, keeping silence silent."""
+        return x if x == -math.inf else float(round(_dec(x) + louder, 6))
+
+    sounding = [p.body for p in (a, b) if p.body.level_db > -math.inf]
+    if len(sounding) > 1:
+        raise PatchError(["body: both patches have a sounding body, and a patch is one drum's head; silence one"])
+    body = (
+        a.body
+        if not sounding or sounding[0] is a.body
+        else dataclasses.replace(b.body, level_db=level(b.body.level_db))
+    )
+    return dataclasses.replace(
+        a,
+        body=body,
+        noise=(*a.noise, *(dataclasses.replace(n, level_db=level(n.level_db)) for n in b.noise)),
+        rim=(*a.rim, *(dataclasses.replace(r, level_db=level(r.level_db)) for r in b.rim)),
+        brush=(*a.brush, *(dataclasses.replace(r, level_db=level(r.level_db)) for r in b.brush)),
+    )

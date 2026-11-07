@@ -14,7 +14,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from halyard_synth import cli, patch
+from halyard_synth import cli, patch, render
 from halyard_synth.curve import amplitude_curve, pitch_curve
 from halyard_synth.patch import PatchError, dumps, from_dict, loads
 
@@ -1240,3 +1240,42 @@ def test_roll_failures() -> None:
 
 
 ROLL_US = 0.0005  # a knot's time, written to 1 µs
+
+
+# Stacks.
+
+
+def test_a_stack_without_drive_is_the_sum_of_its_two_hits() -> None:
+    """Find a stack's render, the drive bypassed, the sum of the two renders, the second scaled by --db."""
+    snare = dataclasses.replace(loads(cli.reference_text("house")), drive=patch.Drive(0.0))
+    clap = loads(cli.reference_text("clap"))
+    clap = dataclasses.replace(clap, drive=patch.Drive(0.0), output=snare.output, seed=snare.seed)
+    both = patch.stack(snare, clap, -4.0)
+    assert len(both.noise) == len(snare.noise) + len(clap.noise)
+    assert both.body == snare.body
+    a, b, s = (render.render(x)[0].astype(float) for x in (snare, clap, both))
+    n = max(a.size, b.size)
+    total = np.pad(a, (0, n - a.size)) + 10 ** (-4 / 20) * np.pad(b, (0, n - b.size))
+    np.testing.assert_allclose(s, total[: s.size], rtol=0, atol=STACK_EXACT)
+    assert not np.any(total[s.size :])
+
+
+def test_a_stack_keeps_the_sounding_body_and_refuses_two() -> None:
+    """Take the second patch's body when only it sounds, refuse two sounding bodies, and stay within the limits."""
+    clap, snare = loads(cli.reference_text("clap")), loads(cli.reference_text("house"))
+    q = patch.stack(clap, snare, 3.0)
+    assert q.body.tune_hz == snare.body.tune_hz
+    assert q.body.level_db == snare.body.level_db + 3.0
+    assert (q.drive, q.output, q.seed) == (clap.drive, clap.output, clap.seed)
+    assert problems(patch.stack, snare, loads(cli.reference_text("tone")))[0].startswith("body: both patches")
+    found = problems(patch.stack, loads(cli.reference_text("long-snare")), clap)
+    assert "noise: needs 1 to 4 layers, found 5" in found
+    with pytest.raises(PatchError, match="--db: must be a finite number"):
+        patch.stack(snare, clap, math.inf)
+    rims = patch.stack(loads(cli.reference_text("brush")), loads(cli.reference_text("rim-click")), -6.0)
+    assert (len(rims.rim), len(rims.brush)) == (1, 1)
+    silent = patch.stack(clap, dataclasses.replace(snare, body=dataclasses.replace(snare.body, level_db=-math.inf)))
+    assert silent.body == clap.body
+
+
+STACK_EXACT = 2e-7  # float32 output, two renders added against one

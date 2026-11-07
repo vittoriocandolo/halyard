@@ -54,6 +54,7 @@ halyard softer snare.toml 12 > snare-12.toml             # the same drum struck 
 halyard softer snare.toml 24 > snare-24.toml
 halyard flam snare.toml --gap 25 > flam.toml             # a grace note 12 dB softer, 25 ms ahead
 halyard roll snare.toml --count 4 --spacing 60 --crescendo 9 > roll.toml   # four strokes, louder to the last
+halyard stack snare.toml clap.toml --db -4 > layered.toml   # a snare and a clap, one patch, one drive
 halyard pack snare.toml snare-12.toml snare-24.toml --takes 6 --out kit/
 ```
 

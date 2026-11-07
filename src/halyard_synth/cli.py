@@ -3,7 +3,7 @@
 
 """Command line (plan §7.6): halyard init | render | verify | extract | audition | pack.
 
-The editing commands, tune | stretch | bursts | softer | flam | roll, print a complete, canonical patch.
+The editing commands, tune | stretch | bursts | softer | flam | roll | stack, print a complete, canonical patch.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from . import __version__, wav
 from .audition import Settings, audition
 from .pack import Options, pack
-from .patch import Patch, PatchError, Roll, Train, bursts, dumps, flam, load, loads, roll, softer, stretch, tune
+from .patch import Patch, PatchError, Roll, Train, bursts, dumps, flam, load, loads, roll, softer, stack, stretch, tune
 from .reference import verify
 from .render import FORMATS, RenderError, db, export, render_takes
 
@@ -124,6 +124,11 @@ def cmd_bursts(args: argparse.Namespace) -> int:
 def cmd_softer(args: argparse.Namespace) -> int:
     """Print the same drum struck softer."""
     return _edit(args.patch, f"make it {args.db:g} dB softer", softer, args.db, args.glide, args.contact)
+
+
+def cmd_stack(args: argparse.Namespace) -> int:
+    """Print one patch that sounds two: a snare and a clap, say."""
+    return _edit(args.patch, f"stack {args.other} on it", stack, _patch(args.other), args.db)
 
 
 def cmd_roll(args: argparse.Namespace) -> int:
@@ -353,6 +358,12 @@ def _edit_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> 
     )
     p.add_argument("--contact", type=_finite, default=0.2, help="their contact exponent, as softer's (default 0.2)")
     p.set_defaults(run=cmd_roll)
+
+    p = sub.add_parser("stack", help="print one patch that sounds two, such as a snare and a clap, through one drive")
+    p.add_argument("patch", help="the patch whose body, drive, output and seed the stack keeps")
+    p.add_argument("other", help="the patch whose sources join it")
+    p.add_argument("--db", type=_finite, default=0.0, help="how much louder the other's sources (default 0)")
+    p.set_defaults(run=cmd_stack)
 
 
 def _play_commands(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
