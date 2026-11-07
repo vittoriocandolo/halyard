@@ -29,6 +29,7 @@ The instrument now serves a declared musical aim: producers whose tracks are led
 | Rims: up to two `[[rim]]` sources, each up to eight modes at their own frequencies in Hz, with a damping and a shape (§2.3) | A hoop and a stick ring with no harmonic relation to the head, so a rimshot or a cross-stick needs modes that the tuning and the glide do not move |
 | A brush: one `[[brush]]`, a noise layer whose band moves by a sweep of up to an octave (§2.4) | Brushes sweep across the head. One noise blended by a cubic B-spline across third-octave copies keeps the written band's shape within 0.5 dB and its level within 0.1 dB all along the sweep, measured on random bands; the blend is C², so the kink bound gains the sweep's knots and the crossings where B‴ steps |
 | `flam` and `roll`: softer strokes before the main one, as ordinary knots; `stack`: two hits in one patch (§4) | A flam is played, and producers program it; like `bursts`, it adds no parameter |
+| `[takes]`: each take struck harder or softer and its later rises moved, drawn from the seed under `snare/takes/v1` (§2.7) | Round robins of a played drum differ in more than their noise |
 | Nine more references, fifteen in all (§1, §8.4) | The genres' hits and the played end: `machine`, `house`, `short-clap`, `rim-click`, `big-clap`, `long-snare`, `rimshot`, `cross-stick` and `brush`, measured like the six |
 
 Both new sources are optional arrays: a patch without them reads and renders as before, so the schema stays 1 for the first release. Acoustic realism stays outside: these are synthesized rimshots, cross-sticks and brushes, not models of a shell, a stick or a room.
@@ -483,6 +484,7 @@ There are three separate promises, as in the kick:
 | output | 44.1, 48, 88.2 or 96 kHz; float32, pcm24 or pcm16; gain −60 – +24 dB; peak target −60 – 0 dBFS |
 | `seed` | integer, 0 to 2⁶³ − 1, takes included |
 | rims (revision 5) | 0 – 2, each 1 – 8 modes in 100 Hz – 20 kHz, strictly increasing, the loudest exactly 0 dB; `damping` 0 – 3, with (f_max / f_1)^damping ≤ 512, the body's largest compression; shape by 2 s |
+| takes (revision 5) | none, or `strength_db` 0 – 6 and `timing_ms` 0 – 5, the hardest and softest take inside the valid domain |
 | brush (revision 5) | 0 – 1; a layer's fields, its shape by 1 s; `sweep` 2 – 32 knots by 1 s, ratios 0.5 – 2 and an octave apart at most, both band edges within 20 Hz – 20 kHz at every knot |
 
 **The validated-domain rule** takes the form measured on the kick, where P is the output peak at unity gain:

@@ -25,6 +25,9 @@ The first public release.
 - A brush: a noise layer whose band moves during the hit by a sweep of up to
   an octave, as one noise filtered rather than a crossfade, coherent with the
   layers and gated by the rattle like them.
+- Takes that differ as played: an optional `[takes]` section strikes each take
+  up to a set strength harder or softer and moves its later rises, such as a
+  clap's bursts, by up to a set time, drawn from the seed alone.
 - The validated domain: every render reports whether it lies where its
   aliasing is demonstrated below −100 dB, from a rule refit on an adversarial
   grid of 1,441 fixtures, with the cause of any predicted aliasing and the

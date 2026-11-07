@@ -161,6 +161,8 @@ In brief:
   cross-stick is a rim almost alone.
 - **Brush.** One `[[brush]]`, or none: a noise layer whose band moves by a
   sweep of up to an octave, as one noise filtered rather than a crossfade.
+- **Takes.** An optional `[takes]` makes each take differ as played: struck
+  harder or softer, its later rises moved, all drawn from the seed.
 - **Drive.** `drive.db` is the saturator's small-signal gain on the sum; 0 dB
   is exact bypass.
 - **Seed.** Each seed is a take of the same sound. `--takes N` renders seeds

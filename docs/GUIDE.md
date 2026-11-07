@@ -147,6 +147,27 @@ as a layer and leaves its sweep alone.
 
 ![The brush reference's spectral centroid follows its sweep, and stays put with the sweep held](figures/sweep.svg)
 
+### Takes
+
+One `[takes]` table, written last, or none. Without it, the takes of a set,
+`--takes N` and a pack's round robins, are the same drum struck the same way,
+differing only in their noise: a machine's repeats. With it, each take is
+played:
+
+| Field | Range | What it does |
+|---|---|---|
+| `strength_db` | 0 – 6 | Each take is struck up to this much harder or softer, by `softer`'s rules: its level, glide, rises and top move together. |
+| `timing_ms` | 0 – 5 | Each rise of a layer, rim or brush after its first, such as a clap's later bursts, moves up to this much earlier or later, with what follows it. |
+
+The body and the first rise of every shape stay where they are, so every take
+stays on the beat, and no move brings two knots within 10 µs or a shape past
+its limit. Every take is drawn from the seed alone, under its own key, so it
+is the same take in every version and on every platform, and a take's WAV
+carries the patch that renders it again, `[takes]` included. A patch whose
+hardest or softest take would leave the valid domain is refused. One to two dB
+and a millisecond or two make a 16th-note roll sound played; a clap's timing
+is its hands.
+
 ### Drive
 
 `drive.db`, 0 – 48 dB, is the small-signal gain of a tanh saturator on the sum

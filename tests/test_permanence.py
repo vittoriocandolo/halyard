@@ -23,6 +23,7 @@ def test_the_names_a_patch_and_a_file_carry() -> None:
     assert wav.PRIVATE == b"snar"
     assert noise.KEY == b"snare/noise/v1"
     assert noise.DITHER_KEY == b"snare/dither/v1"
+    assert patch.TAKES_KEY == b"snare/takes/v1"
 
 
 def test_the_package_command_and_references_keep_their_names() -> None:

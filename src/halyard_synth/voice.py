@@ -34,6 +34,7 @@ from scipy.optimize import brentq
 
 from . import noise
 from .curve import Curve, amplitude_curve, compressed, pitch_curve
+from .patch import played
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -151,7 +152,8 @@ def _seconds(knots: Iterable[tuple[float, float]]) -> list[float]:
 
 
 def voice(p: Patch) -> Voice:
-    """Reduce a patch to what synthesis needs."""
+    """Reduce a patch to what synthesis needs: the take its seed names, as played when its takes differ."""
+    p = played(p)
     b = p.body
     body_amp = amplitude_curve(_seconds(b.amp), [g for _, g in b.amp])
     g_b = 10.0 ** (b.level_db / 20.0)

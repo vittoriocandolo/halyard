@@ -798,7 +798,7 @@ def render_takes(p: Patch, takes: int = 1, *, level_match: bool = False) -> tupl
         modes_hz=tuple(p.body.tune_hz * r for r, _ in p.body.modes),
         body_sounds=v.body_sounds,
         rims_hz=tuple((k, tuple(hz for hz, _ in r.modes)) for k, r in enumerate(p.rim, 1) if r.level_db > -math.inf),
-        source_ms=p.length_ms,
+        source_ms=1000 * v.t_src,  # the take as played, when takes differ
         samples=audio[0].size,
         sample_rate=p.output.sample_rate,
         format=p.output.format,

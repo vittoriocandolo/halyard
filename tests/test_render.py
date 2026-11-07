@@ -5,13 +5,14 @@
 
 import dataclasses
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 from scipy.signal import fftconvolve
 
-from halyard_synth import cli, render, voice
+from halyard_synth import cli, patch, render, voice, wav
 from halyard_synth.loudness import momentary_max
 from halyard_synth.patch import SAMPLE_RATES, loads
 
@@ -547,3 +548,20 @@ def test_a_crossing_is_named_by_its_segment_and_timed_by_itself() -> None:
 
 
 CROSSING_MS = (10.0, 12.0)  # the segment's knots
+
+
+def test_takes_that_differ_render_as_played_and_their_files_render_again(tmp_path: Path) -> None:
+    """Render takes that differ in strength, find their loudness spread, and each file's own patch render it again."""
+    p = dataclasses.replace(loads(cli.reference_text("house")), takes=patch.Takes(3.0, 0.0))
+    audio, report = render.render_takes(p, 6)
+    loudness = [t.loudness for t in report.takes]
+    assert max(loudness) - min(loudness) > 1.0  # struck up to 3 dB harder or softer
+    for a, take in zip(audio, report.takes, strict=True):
+        path = tmp_path / f"take{take.number}.wav"
+        render.export(path, a, p, report, take)
+        meta = wav.read(path).meta
+        assert meta is not None
+        own = loads(meta["patch"])
+        assert own.takes == p.takes
+        again, _ = render.render(own)  # a gain-mode set: every take at the patch's own gain
+        np.testing.assert_allclose(again, a, rtol=0, atol=1e-7)

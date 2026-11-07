@@ -32,6 +32,7 @@ FAMILIES = {
     "snaps",
     "rims",
     "brushes",
+    "takes",
     "dynamics",
     "seeds",
     "rates",

@@ -6,6 +6,7 @@
 import codecs
 import copy
 import dataclasses
+import itertools
 import math
 from collections.abc import Callable
 from pathlib import Path
@@ -1279,3 +1280,59 @@ def test_a_stack_keeps_the_sounding_body_and_refuses_two() -> None:
 
 
 STACK_EXACT = 2e-7  # float32 output, two renders added against one
+
+
+# Takes that differ as played.
+
+TAKES = {"strength_db": 2.0, "timing_ms": 3.0}
+
+
+def test_takes_are_optional_and_checked(example_dict: dict[str, Any]) -> None:
+    """Read [takes] as written and none when absent, refuse what is out of range, and round-trip it."""
+    assert from_dict(example_dict).takes is None
+    p = from_dict(dict(example_dict, takes=TAKES))
+    assert p.takes == patch.Takes(2.0, 3.0)
+    assert loads(dumps(p)) == p
+    assert patch.to_dict(p)["takes"] == TAKES
+    assert "takes.strength_db: 7 is outside 0 … 6" in problems(
+        from_dict,
+        dict(example_dict, takes=dict(TAKES, strength_db=7)),
+    )
+    assert "takes.timing_ms: missing" in problems(from_dict, dict(example_dict, takes={"strength_db": 1.0}))
+    assert "takes: expected a takes section" in problems(dataclasses.replace, p, takes=cast("Any", 1))
+
+
+def test_takes_whose_hardest_or_softest_strike_leaves_the_domain_are_refused() -> None:
+    """Refuse takes that, struck harder or softer by the most they may, would leave the valid domain."""
+    loud = make(**{"body.level_db": 22.0})
+    found = problems(dataclasses.replace, loud, takes=patch.Takes(6.0, 0.0))
+    assert found[0].startswith("takes.strength_db: a take struck 6 dB harder leaves the domain: body.level_db")
+
+
+def test_every_take_is_the_drum_played_the_same_on_every_platform() -> None:
+    """Find a take the same each time, struck within its strength, later bursts moving, the strike on the beat."""
+    p = dataclasses.replace(loads(cli.reference_text("clap")), takes=patch.Takes(2.0, 3.0))
+    plain = dataclasses.replace(p, takes=None)
+    assert patch.played(plain) is plain
+    first = patch.rises([g for _, g in p.noise[0].amp])[0][0]
+    later = set()
+    for seed in range(1, 17):
+        q = dataclasses.replace(p, seed=seed)
+        take = patch.played(q)
+        assert take == patch.played(q)
+        assert take.takes is None
+        assert abs(take.noise[0].level_db - p.noise[0].level_db) <= TAKES["strength_db"] + 1e-6
+        assert take.noise[0].amp[first] == p.noise[0].amp[first]  # the strike stays on the beat
+        later.add(take.noise[0].amp[4][0])
+    assert len(later) > 1  # the later bursts move from take to take
+
+
+def test_a_move_never_brings_knots_within_10_us_nor_past_the_limit() -> None:
+    """Move rises by as much as 5 ms where the gaps are 20 µs, and near the shape's limit, and find every take valid."""
+    tight = amp((0, 0), (0.01, 1), (0.02, 0.5), (0.03, 1), (0.04, 0.5), (0.05, 1), (999.99, 0))
+    p = make(**{"noise[1].amp": tight}, takes={"strength_db": 0.0, "timing_ms": 5.0})
+    for seed in range(1, 33):
+        take = patch.played(dataclasses.replace(p, seed=seed))
+        times = [ms for ms, _ in take.noise[0].amp]
+        assert all(b - a >= 0.01 - 1e-9 for a, b in itertools.pairwise(times))
+        assert times[-1] <= patch.MAX_NOISE_MS

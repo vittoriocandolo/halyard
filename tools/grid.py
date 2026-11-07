@@ -178,6 +178,7 @@ def fixtures() -> list[Fixture]:
     _rates(add)
     _random(out)
     _longest(add)
+    _takes(add)
     return out
 
 
@@ -497,6 +498,24 @@ def _seeds(add: Add, out: list[Fixture]) -> None:
     for fam, name in picks:
         for seed in range(2, 17):
             add("seeds", f"{fam}-{name}-s{seed}", **named[(fam, name)], seed=seed)
+
+
+def _takes(add: Add) -> None:
+    """Add takes that differ as played, at their widest, from four references across four seeds."""
+    for name in ("clap", "crack", "rimshot", "brush"):
+        d = patch.to_dict(patch.loads(cli.reference_text(name)))
+        parts = {k: d[k] for k in ("body", "noise", "rim", "brush", "drive") if k in d}
+        for seed in range(1, 5):
+            add(
+                "takes",
+                f"{name}-s{seed}",
+                **parts,
+                seed=seed,
+                takes={"strength_db": TAKE_DB, "timing_ms": patch.MAX_TAKE_MS},
+            )
+
+
+TAKE_DB = 3.0  # the takes family's strength: as wide as every one of its references takes
 
 
 def _rates(add: Add) -> None:

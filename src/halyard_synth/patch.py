@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import codecs
 import dataclasses
+import hashlib
 import itertools
 import math
 import re
@@ -32,7 +33,7 @@ from .curve import amplitude_curve, pitch_curve
 
 if TYPE_CHECKING:
     import os
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
 type Knots = tuple[tuple[float, float], ...]  # (ms, value) pairs, or (ratio, level_db) for modes
 
@@ -51,6 +52,8 @@ MIN_SPACING_MS = Decimal("0.01")  # 10 µs, compared on the decimal values as wr
 MAX_SEED = 2**63 - 1
 MAX_BURSTS = 10
 MAX_RIMS = 2
+MAX_TAKE_DB, MAX_TAKE_MS = 6.0, 5.0  # how far takes may differ in strength and in timing
+TAKES_KEY = b"snare/takes/v1"  # the stream every take's variation is drawn from
 MAX_BRUSHES = 1  # a brush's band takes up to seven noise tables
 SWEEP = (0.5, 2.0)  # a sweep's ratios, an octave either way
 SWEEP_TRAVEL = 2.0  # and an octave between its lowest and highest
@@ -133,8 +136,16 @@ class Output:
 
 
 @dataclass(frozen=True)
+class Takes:
+    """How a patch's takes differ as played: in strength, and in the timing of every rise after the first."""
+
+    strength_db: float  # each take struck up to this much harder or softer, by softer's rules
+    timing_ms: float  # each later rise of a layer, rim or brush moved up to this much earlier or later
+
+
+@dataclass(frozen=True)
 class Patch:
-    """One hit, complete: its seed, body, layers, drive and output."""
+    """One hit, complete: its seed, body, layers, drive and output, and how its takes differ, if they do."""
 
     seed: int
     body: Body
@@ -143,6 +154,7 @@ class Patch:
     brush: tuple[Brush, ...]
     drive: Drive
     output: Output
+    takes: Takes | None = None  # None: takes differ only in their noise
 
     def __post_init__(self) -> None:
         """Validate the patch, refusing it with every problem."""
@@ -291,6 +303,26 @@ def _validate(p: Patch, problems: _Problems) -> None:
         _validate_brushes(brush, problems)
     _validate_drive(p.drive, problems)
     _validate_output(p.output, problems)
+    if p.takes is not None and not problems:
+        _validate_takes(p, problems)
+
+
+def _validate_takes(p: Patch, problems: _Problems) -> None:
+    """Check how takes differ: within range, and the hardest and softest take inside the valid domain."""
+    t: object = p.takes
+    if not isinstance(t, Takes):
+        problems.add("takes", "expected a takes section")
+        return
+    strength = problems.number("takes.strength_db", t.strength_db, 0.0, MAX_TAKE_DB)
+    problems.number("takes.timing_ms", t.timing_ms, 0.0, MAX_TAKE_MS)
+    if not strength:
+        return
+    plain = dataclasses.replace(p, takes=None)
+    for db, how in ((-strength, "harder"), (strength, "softer")):
+        try:
+            softer(plain, db)
+        except PatchError as e:
+            problems.add("takes.strength_db", f"a take struck {strength:g} dB {how} leaves the domain: {e.problems[0]}")
 
 
 def _validate_seed(seed: object, problems: _Problems) -> None:
@@ -485,10 +517,11 @@ _FIELDS = {
     "body": ("tune_hz", "level_db", "damping", "modes", "pitch", "amp"),
     "noise": ("level_db", "band_hz", "rattle", "amp"),
     "rim": ("level_db", "damping", "modes", "amp"),
+    "takes": ("strength_db", "timing_ms"),
     "drive": ("db",),
     "output": ("sample_rate", "format", "mode", "db", "polarity"),
 }  # a [[brush]] has a layer's fields and its sweep
-_OPTIONAL = ("rim", "brush")  # arrays of tables that may be absent: none of them
+_OPTIONAL = ("rim", "brush", "takes")  # what may be absent: no rims, no brush, takes that differ only in noise
 
 
 def _keys(problems: _Problems, prefix: str, table: dict[str, Any], expected: Sequence[str]) -> bool:
@@ -660,10 +693,13 @@ def from_dict(data: object) -> Patch:
     if brush is not None:
         _validate_brushes(brush, problems)
     drive, output = _drive(problems, data), _output(problems, data)
+    takes = None
+    if "takes" in data and (t := _section(problems, "takes", data["takes"], _FIELDS["takes"])) is not None:
+        takes = Takes(_float(t["strength_db"]), _float(t["timing_ms"]))
     # Anything missing or unbuilt has been reported, so with no problem every part is there and checked.
     if problems or body is None or noise is None or rim is None or brush is None or drive is None or output is None:
         raise PatchError(problems)
-    return Patch(data["seed"], body, noise, rim, brush, drive, output)
+    return Patch(data["seed"], body, noise, rim, brush, drive, output, takes)
 
 
 def loads(text: str) -> Patch:
@@ -753,6 +789,7 @@ def to_dict(p: Patch) -> dict[str, Any]:
             "db": p.output.db,
             "polarity": p.output.polarity,
         },
+        **({"takes": {"strength_db": p.takes.strength_db, "timing_ms": p.takes.timing_ms}} if p.takes else {}),
     }
 
 
@@ -829,6 +866,14 @@ def dumps(p: Patch) -> str:
             ("polarity", str(o.polarity), ""),
         ],
     )
+    if p.takes is not None:
+        lines += ["", _note("[takes]", "how takes differ as played")]
+        lines += _rows(
+            [
+                ("strength_db", _f(p.takes.strength_db), "each take this much harder or softer, at most"),
+                ("timing_ms", _f(p.takes.timing_ms), "each later rise this much earlier or later, at most"),
+            ],
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -1359,3 +1404,50 @@ def stack(a: Patch, b: Patch, db: float = 0.0) -> Patch:
         rim=(*a.rim, *(dataclasses.replace(r, level_db=level(r.level_db)) for r in b.rim)),
         brush=(*a.brush, *(dataclasses.replace(r, level_db=level(r.level_db)) for r in b.brush)),
     )
+
+
+def played(p: Patch) -> Patch:
+    """Return the take p's seed names, as played: the patch itself when its takes differ only in their noise.
+
+    Every take is drawn from SHAKE-256 of its own key and the seed, so a take is
+    the same in every version and on every platform. It is the drum struck
+    softer by d dB, by softer's rules, d drawn evenly from ±`strength_db`; then
+    every rise of a layer, rim or brush after its first, such as a clap's later
+    bursts, moves by up to ±`timing_ms`, with every knot after it, never closer
+    to the knot before than 10 µs nor past the shape's limit. The body and the
+    first rise of every shape stay where they are, so a take stays on the beat.
+    The result has no [takes]: it is that one take.
+    """
+    t = p.takes
+    if t is None:
+        return p
+    words = hashlib.shake_256(TAKES_KEY + p.seed.to_bytes(8, "little")).digest(8 * _TAKE_DRAWS)
+    draws = iter(int.from_bytes(words[i : i + 8], "little") >> 11 for i in range(0, len(words), 8))
+    q = dataclasses.replace(p, takes=None)
+    softness = t.strength_db * (2 * next(draws) * 2.0**-53 - 1)
+    if softness:
+        q = softer(q, softness)
+    if not t.timing_ms:
+        return q
+    curves = {}
+    for name in curve_names(q):
+        if name.endswith(".amp") and not name.startswith("body"):
+            limit = Decimal(repr(MAX_BODY_MS if name.startswith("rim") else MAX_NOISE_MS))
+            curves[name] = _moved(curve_knots(q, name), t.timing_ms, draws, limit)
+    return _set_curves(q, curves)
+
+
+_TAKE_DRAWS = 1 + 7 * MAX_KNOTS  # a strength, and a move for every rise of every layer, rim and brush, at most
+
+
+def _moved(knots: Knots, timing_ms: float, draws: Iterator[int], limit: Decimal) -> Knots:
+    """Move every rise after the first by a draw within ±timing_ms, and every knot after it with it."""
+    times, gains = [_dec(ms) for ms, _ in knots], [g for _, g in knots]
+    reach = _dec(timing_ms)
+    for first, _ in rises(gains)[1:]:
+        u = Decimal(next(draws)) / Decimal(2**53)
+        move = (reach * (2 * u - 1)).quantize(_US)  # to 1 µs first, so the bounds below hold as written
+        move = max(move, MIN_SPACING_MS - (times[first] - times[first - 1]))  # never closer than 10 µs
+        move = min(move, limit - times[-1])  # never past the shape's limit
+        times = [*times[:first], *(x + move for x in times[first:])]
+    return tuple((_ms(x), g) for x, g in zip(times, gains, strict=True))
