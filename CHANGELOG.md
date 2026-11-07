@@ -27,7 +27,7 @@ The first public release.
   layers and gated by the rattle like them.
 - The validated domain: every render reports whether it lies where its
   aliasing is demonstrated below −100 dB, from a rule refit on an adversarial
-  grid of 1,417 fixtures, with the cause of any predicted aliasing and the
+  grid of 1,441 fixtures, with the cause of any predicted aliasing and the
   drive headroom left before the status changes. `halyard verify` checks a
   render against a reference rendered at 128 times the base rate, itself
   checked against one at 256.

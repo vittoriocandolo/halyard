@@ -401,11 +401,18 @@ def rim(level: float, damping: float, hz: tuple[tuple[float, float], ...], shape
 
 
 def _rims(add: Add) -> None:
-    """Add modes × rise × damping × level × drive, the rim alone, and over the body and wires."""
+    """Add modes × rise × damping × level × drive, the rim alone, and over the body and wires.
+
+    Damping is 0 or the most the modes' spread allows: 3, or 2.16 for the eight
+    modes 17.8 times apart, whose highest would otherwise decay faster than 512
+    times their first.
+    """
     for sname, hz in RIM_SETS.items():
         for rise in (0.01, 0.05, 1.0):
             shape = amp((0, 0), (rise, 1), (rise + 5, 0.35), (30, 0.08), (70, 0))
-            for damping in (0.0, 3.0):
+            spread = hz[-1][0] / hz[0][0]
+            deepest = 3.0 if spread == 1 else min(3.0, math.floor(100 * math.log(patch.MAX_COMPRESSION, spread)) / 100)
+            for damping in (0.0, deepest):  # the most a rim with these modes may take
                 for level in (0, 12):
                     for drive in (0, 12, 24, 36):
                         add(

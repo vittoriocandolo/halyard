@@ -83,7 +83,7 @@ strengths ([GUIDE.md](GUIDE.md#editing-commands)):
   sample rate and is band-limited once by a frozen filter. Every render then
   states whether it lies where its aliasing is demonstrated below −100 dB,
   what dominates it, and how much more drive it would take to leave. That
-  judgement comes from a rule fitted on an adversarial grid of 1,417
+  judgement comes from a rule fitted on an adversarial grid of 1,441
   fixtures, which never finds an error inside the domain above −110 dB, and
   `halyard verify` measures any render against a reference rendered far
   above the sample rate.
