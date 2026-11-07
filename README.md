@@ -244,6 +244,8 @@ uv run python -m tools.headroom run --dense      # the report's drive headroom a
 uv run python -m tools.headroom analyze docs/grid/headroom.csv
 uv run python -m tools.references                # the fifteen references over seeds 1–16
 uv run python -m tools.bench                     # render time and memory on this machine
+uv run python -m tools.sfz_players prepare DIR   # a pack and notes; then tools/sfz_players.sh DIR (Docker)
+uv run python -m tools.sfz_players check DIR     # and what sfizz and liquidsfz played
 uv run python -m tools.golden                    # regenerate golden renders (a deliberate sound change only)
 uv run python -m docs.build                      # the figures, sounds and gallery in docs/, from the code
 uv run python -m docs.build --check              # what is out of date (a test checks it too)
@@ -276,7 +278,7 @@ sample-replacement benchmark.
 |---|---|
 | 1. Complete path | Done. Every §8.1 criterion that does not need the grid passes (VALIDATION.md). |
 | 2. Measure and freeze | Done. K = 32, the rule's constant (0.54) and the decimators are frozen from an adversarial grid, now 1,417 fixtures at 32× (K chosen on the first 957 at 16× and 32×); the drive headroom is checked on every fixture; golden renders begin. |
-| 3. Audition and delivery | Done here with a simulated device: exact buffers, stale renders dropped, swaps at hit boundaries, patches and takes cycling, the bed on the grid. Packs parse back from their SFZ with the right velocity and take mapping. Playing through a real device and loading packs in two SFZ players needs you. |
+| 3. Audition and delivery | Done here with a simulated device: exact buffers, stale renders dropped, swaps at hit boundaries, patches and takes cycling, the bed on the grid. Packs parse back from their SFZ with the right velocity and take mapping. Packs play as mapped in sfizz and liquidsfz, built from source in a throwaway container (VALIDATION.md). Playing through a real device needs you. |
 | 4. Voicing | By measurement: the references are loudness-matched, inside with 16 dB or more of drive headroom for seeds 1–16, and every usability task moves its measurement the right way. Approval by ear, in context and across takes and strengths, needs you. |
 | 5. Benchmark | Protocol written (BENCHMARK.md); it needs your samples and your ears. |
 

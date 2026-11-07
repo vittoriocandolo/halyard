@@ -335,12 +335,44 @@ table bounds the times from above. The whole true peak of that patch takes
 decimate with a thread per core; sharing the cores among them took a pack of
 four layers of `fat` with 16 takes from 1.47–1.66 s to 1.37–1.40 s.
 
+## Packs in two SFZ players
+
+`tools/sfz_players.py` writes a pack of the crack reference struck 0, 12 and
+24 dB softer, three takes each, and 24 notes: eight velocities across all
+three layers, each played three times so the round robins cycle.
+`tools/sfz_players.sh` builds sfizz 1.2.3 (`sfizz_render`) and liquidsfz 0.4.1
+(through `tools/liquidsfz_render.cc`, since liquidsfz ships only real-time
+clients) from source in a throwaway Debian 13 container, renders the notes
+and removes the image. The check then identifies every note by the file it
+matches best, piece by piece, and measures its gain against that file below
+2 kHz. Run on the Oryon:
+
+| Player | Notes on their layer and round robin | Worst match | Gain against the mapping | Spread |
+|---|---|---|---|---|
+| sfizz 1.2.3 | 24 of 24, the round robins in order | 0.9893 | −11.52 dB | 0.048 dB |
+| liquidsfz 0.4.1 | 24 of 24, the round robins in order | 0.9975 | −7.22 dB | 0.0001 dB |
+
+So both play every velocity on its layer, cycle the takes in sequence, and
+apply the group's volume and amplitude curve exactly: velocity follows the
+square law across the layers' boundaries, up to each player's own overall
+gain. What the players do differently, measured:
+
+- **sfizz** renders deterministically, freewheeling, to 16-bit PCM, which
+  limits the spread on the softest notes, near −44 dBFS; the loud notes agree
+  within ±0.008 dB. It preloads a sample's first 1,024 frames and streams the
+  rest, and at the seam it plays one frame twice or skips one, so a note
+  matches its file bit for bit at one delay before the seam and at the next
+  after it. That is the player's, not the pack's: the files carry no seam.
+- **liquidsfz** interpolates even at the files' own rate, which rolls the top
+  off by about 3 dB at 20 kHz and lowers a brighter layer's broadband gain by
+  up to 0.12 dB; below 2 kHz it is flat to 0.0001 dB.
+
 ## Listening
 
 Not yet done; it needs a person:
 
-- approval of the six references by ear, dry and in context, across seeds 1–8
-  and in packs of four strengths (§8.4);
+- approval of the fifteen references by ear, dry and in context, across seeds
+  1–8 and in packs of four strengths (§8.4);
 - a 16th-note roll at 120 bpm with six takes against one take;
-- a pack loaded in two SFZ players, and audition through a real device;
+- a pack loaded in your own sampler, and audition through a real device;
 - the sample-replacement benchmark (BENCHMARK.md).

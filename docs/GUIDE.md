@@ -350,6 +350,35 @@ N takes (take j of a layer plays its seed + j − 1).
 Neighbouring layers more than 12 dB apart need a group volume above +6 dB,
 which some players cap; the pack report says so.
 
+## In a DAW
+
+**One-shots.** Drop a rendered WAV on a drum sampler's pad or a sampler's
+key, set to one-shot, with no loop and no fades. Every file starts at exactly
+zero at the strike and ends in its own decaying tail, so the sampler needs
+neither a start offset nor a fade. The `smpl` chunk names the root key, the
+body's tuning as a note, so a sampler that reads it plays the drum at its
+pitch on that key; a sound without a body has none. `halyard render --takes
+N` writes takes `_rr1` … `_rrN` that share one gain: load them as round robins
+or random alternatives, and repeated hits stop sounding like a machine gun.
+
+**Formats.** DAWs read `float32`; `pcm24` and `pcm16`, with seeded dither,
+are for hardware samplers and older software. A render over full scale is
+refused in any format, with the reduction it needs, and nothing is ever
+clipped: lower `output.db`, use a `peak` or `true-peak` target, or pass
+`--allow-over` for a float file that keeps the overs.
+
+**Kits.** `halyard pack` writes an SFZ file that any SFZ player loads, with
+its WAVs beside it: the velocity layers, the round robins and the square law
+are in the mapping. sfizz and liquidsfz, two SFZ players built from source,
+play a pack as mapped (VALIDATION.md). A sampler that does not read SFZ maps
+the files by their names, `<stem>_v<top velocity>_rr<take>.wav`: the velocity
+range of each layer is in the pack report.
+
+**Levels.** The references sit at −27 LUFS so they compare fairly; raise
+`output.db` or set `output.mode = "peak"` with a target for a working level,
+and keep one gain per kit, as `pack` does, so its layers keep their natural
+levels.
+
 ## From Python
 
 Everything the commands do is a function of the package, `halyard_synth`.
