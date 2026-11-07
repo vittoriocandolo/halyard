@@ -1044,6 +1044,14 @@ def test_a_brush_is_optional_and_alone(example_dict: dict[str, Any]) -> None:
     )
     p = from_dict(dict(example_dict, brush=[brush()]))
     assert "brush: expected brushes" in problems(dataclasses.replace, p, brush=[p.brush[0]])
+    whole = cast("Any", (15000, 19000))  # whole numbers, as Python code may write them
+    swept = dataclasses.replace(p.brush[0], band_hz=whole, sweep=((0.0, 1.0), (50.0, 2.0)))
+    found = problems(dataclasses.replace, p, brush=(swept,))
+    assert "brush[1].sweep: takes the high edge to 38000 Hz, above 20 kHz" in found
+    words = cast("Any", ("low", "high"))  # deliberately wrong: edges that are not numbers
+    found = problems(dataclasses.replace, p, brush=(dataclasses.replace(p.brush[0], band_hz=words),))
+    assert not any(m.startswith("brush[1].sweep") for m in found)  # the band's own check names it
+    assert any(m.startswith("brush[1].band_hz[1]") for m in found)
     narrow = cast("Any", (900.0,))  # deliberately wrong: a band of one edge
     found = problems(dataclasses.replace, p, brush=(dataclasses.replace(p.brush[0], band_hz=narrow),))
     assert found == ["brush[1].band_hz: expected [low, high] in Hz"]  # and the sweep's check of the band waits for it
@@ -1142,6 +1150,15 @@ def test_a_flam_is_the_grace_then_the_main_stroke(name: str) -> None:
     )
 
 
+@pytest.mark.parametrize("name", ["fat", "driven", "clap", "big-clap"])
+def test_a_flam_takes_a_grace_softer_than_softer_could_write(name: str) -> None:
+    """Write a flam with a 60 dB grace, where softer itself would leave the domain, its bands and levels unused."""
+    p = loads(cli.reference_text(name))
+    assert problems(patch.softer, p, 60)
+    q = patch.flam(p, GAP_MS, 60)
+    assert (q.noise[0].band_hz, q.body.level_db) == (p.noise[0].band_hz, p.body.level_db)
+
+
 def test_a_flam_of_rims_and_a_brush(example_dict: dict[str, Any]) -> None:
     """Strike a rim and a brush twice too, the brush's sweep shared."""
     p = from_dict(dict(example_dict, rim=[RIM], brush=[brush()]))
@@ -1163,6 +1180,8 @@ def test_flam_failures() -> None:
         with pytest.raises(PatchError, match=name):
             patch.flam(p, gap, grace)
     assert any(m.startswith("noise[2].amp") for m in problems(patch.flam, p, 900.0))  # past the noise's 1 s
+    with pytest.raises(PatchError, match="--grace: 1e-07 dB is too small"):
+        patch.flam(p, GAP_MS, 1e-7)  # its peak would round to 1, the main stroke's
     many = patch.bursts(p, "noise[1]", patch.Train(8, 5.0))
     assert any(m.startswith("noise[1].amp: needs 3 to 32 knots") for m in problems(patch.flam, many, GAP_MS))
 

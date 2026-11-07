@@ -32,7 +32,7 @@ from .curve import amplitude_curve, pitch_curve
 
 if TYPE_CHECKING:
     import os
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
 type Knots = tuple[tuple[float, float], ...]  # (ms, value) pairs, or (ratio, level_db) for modes
 
@@ -343,25 +343,42 @@ def _validate_pitch(
 
 
 def _validate_modes(modes: object, problems: _Problems) -> list[float] | None:
-    """Return the mode ratios if they are valid, else None."""
-    if not isinstance(modes, tuple) or not all(isinstance(m, tuple) and len(m) == PAIR for m in modes):
-        problems.add("body.modes", "expected (ratio, level_db) modes")
-        return None
-    if not 1 <= len(modes) <= MAX_MODES:
-        problems.add("body.modes", f"needs 1 to {MAX_MODES} modes, found {len(modes)}")
-        return None
-    ratios = [problems.number(f"body.modes[{i}].ratio", r, 1.0, MAX_RATIO) for i, (r, _) in enumerate(modes, 1)]
-    levels = [problems.number(f"body.modes[{i}].level_db", v, -60.0, 0.0) for i, (_, v) in enumerate(modes, 1)]
-    if ratios[0] is not None and ratios[0] != 1.0:
+    """Return the body's mode ratios if they are valid, else None: the first exactly 1, the rest up to 8."""
+    ratios = _validate_mode_list(modes, "body.modes", ("ratio", 1.0, MAX_RATIO, MAX_MODES), "mode ratios", problems)
+    if ratios is not None and ratios[0] != 1.0:
         problems.add("body.modes[1].ratio", "the first mode defines the tuning: its ratio must be exactly 1")
-    for i, (a, b) in enumerate(itertools.pairwise(ratios), 2):
+    return ratios
+
+
+def _validate_mode_list(
+    modes: object,
+    where: str,
+    spec: tuple[str, float, float, int],
+    plural: str,
+    problems: _Problems,
+) -> list[float] | None:
+    """Check modes as (value, level_db) pairs: their count, values in range and increasing, the loudest exactly 0 dB.
+
+    `spec` is the value's name, its range and the most modes allowed; return
+    the values if every one is a number in range, else None.
+    """
+    key, lo, hi, most = spec
+    if not isinstance(modes, tuple) or not all(isinstance(m, tuple) and len(m) == PAIR for m in modes):
+        problems.add(where, f"expected ({key}, level_db) modes")
+        return None
+    if not 1 <= len(modes) <= most:
+        problems.add(where, f"needs 1 to {most} modes, found {len(modes)}")
+        return None
+    values = [problems.number(f"{where}[{i}].{key}", v, lo, hi) for i, (v, _) in enumerate(modes, 1)]
+    levels = [problems.number(f"{where}[{i}].level_db", v, -60.0, 0.0) for i, (_, v) in enumerate(modes, 1)]
+    for i, (a, b) in enumerate(itertools.pairwise(values), 2):
         if a is not None and b is not None and not b > a:
-            problems.add(f"body.modes[{i}].ratio", "mode ratios must strictly increase")
+            problems.add(f"{where}[{i}].{key}", f"{plural} must strictly increase")
     loudness = [v for v in levels if v is not None]
     if len(loudness) == len(levels) and max(loudness) != 0.0:
-        problems.add("body.modes", f"the loudest mode must be exactly 0 dB, found {max(loudness)!r}")
-    valid = [r for r in ratios if r is not None]
-    return valid if len(valid) == len(ratios) else None
+        problems.add(where, f"the loudest mode must be exactly 0 dB, found {max(loudness)!r}")
+    valid = [v for v in values if v is not None]
+    return valid if len(valid) == len(values) else None
 
 
 def _validate_layers(layers: tuple[Layer, ...], problems: _Problems) -> None:
@@ -411,11 +428,14 @@ def _validate_sweep(sweep: list[tuple[float, float]], band: object, path: str, p
     if high / low > SWEEP_TRAVEL:
         problems.add(f"{path}.sweep", f"travels {high / low:g} times, more than an octave")
     # The band is extreme only at sweep knots, since each segment is monotone, so the knots suffice.
-    if isinstance(band, tuple) and len(band) == PAIR and all(isinstance(e, float) for e in band):
-        if band[0] * low < LOWEST_BAND_HZ:
-            problems.add(f"{path}.sweep", f"takes the low edge to {band[0] * low:g} Hz, below 20 Hz")
-        if band[1] * high > HIGHEST_HZ:
-            problems.add(f"{path}.sweep", f"takes the high edge to {band[1] * high:g} Hz, above 20 kHz")
+    if not isinstance(band, tuple) or len(band) != PAIR:
+        return  # the layer's check has reported it
+    lo, hi = band
+    if all(isinstance(e, (int, float)) and not isinstance(e, bool) for e in (lo, hi)):  # whole numbers too
+        if lo * low < LOWEST_BAND_HZ:
+            problems.add(f"{path}.sweep", f"takes the low edge to {lo * low:g} Hz, below 20 Hz")
+        if hi * high > HIGHEST_HZ:
+            problems.add(f"{path}.sweep", f"takes the high edge to {hi * high:g} Hz, above 20 kHz")
 
 
 def _validate_rims(rims: tuple[Rim, ...], problems: _Problems) -> None:
@@ -426,8 +446,9 @@ def _validate_rims(rims: tuple[Rim, ...], problems: _Problems) -> None:
         path = f"rim[{j}]"
         problems.number(f"{path}.level_db", r.level_db, -90.0, 24.0, silence=True)
         damping = problems.number(f"{path}.damping", r.damping, 0.0, 3.0)
-        if _validate_rim_modes(r.modes, path, problems) and damping is not None:
-            s = (r.modes[-1][0] / r.modes[0][0]) ** damping
+        hz = _validate_mode_list(r.modes, f"{path}.modes", ("hz", *RIM_HZ, MAX_RIM_MODES), "rim modes", problems)
+        if hz is not None and damping is not None:
+            s = (hz[-1] / hz[0]) ** damping
             if s > MAX_COMPRESSION:
                 problems.add(
                     f"{path}.damping",
@@ -435,27 +456,6 @@ def _validate_rims(rims: tuple[Rim, ...], problems: _Problems) -> None:
                     f"{MAX_COMPRESSION:g}; lower the damping or bring the modes closer",
                 )
         problems.shape(f"{path}.amp", r.amp, MAX_BODY_MS)
-
-
-def _validate_rim_modes(modes: object, path: str, problems: _Problems) -> bool:
-    """Check a rim's modes: 1 to 8, in Hz from 100 Hz to 20 kHz, increasing, the loudest exactly 0 dB; True if so."""
-    where = f"{path}.modes"
-    if not isinstance(modes, tuple) or not all(isinstance(m, tuple) and len(m) == PAIR for m in modes):
-        problems.add(where, "expected (hz, level_db) modes")
-        return False
-    if not 1 <= len(modes) <= MAX_RIM_MODES:
-        problems.add(where, f"needs 1 to {MAX_RIM_MODES} modes, found {len(modes)}")
-        return False
-    before = len(problems)
-    found = [problems.number(f"{where}[{i}].hz", hz, RIM_HZ[0], RIM_HZ[1]) for i, (hz, _) in enumerate(modes, 1)]
-    given = [problems.number(f"{where}[{i}].level_db", v, -60.0, 0.0) for i, (_, v) in enumerate(modes, 1)]
-    for i, (a, b) in enumerate(itertools.pairwise(found), 2):
-        if a is not None and b is not None and not b > a:
-            problems.add(f"{where}[{i}].hz", "rim modes must strictly increase")
-    levels = [v for v in given if v is not None]
-    if len(levels) == len(given) and max(levels) != 0.0:
-        problems.add(where, f"the loudest mode must be exactly 0 dB, found {max(levels)!r}")
-    return len(problems) == before
 
 
 def _validate_drive(d: object, problems: _Problems) -> None:
@@ -549,7 +549,7 @@ def _body(problems: _Problems, table: object) -> Body | None:
     return Body(_float(t["tune_hz"]), _float(t["level_db"]), _float(t["damping"]), modes, pitch, amp)
 
 
-def _layer(problems: _Problems, path: str, table: object) -> Layer | None:
+def _layer(problems: _Problems, path: str, table: dict[str, Any]) -> Layer | None:
     """Build a layer, or the layer a brush sweeps; None after reporting what is wrong."""
     t = _section(problems, path, table, _FIELDS["noise"])
     if t is None:
@@ -578,64 +578,47 @@ def _header(data: dict[str, Any]) -> None:
         raise PatchError([f"schema: unsupported version {schema}; this renderer reads schema {SCHEMA}"])
 
 
-def _noise(problems: _Problems, data: dict[str, Any]) -> tuple[Layer, ...] | None:
-    """Build and check the layers; None after reporting what is wrong."""
-    if "noise" not in data:
-        return None
-    tables = data["noise"]
+def _tables_of[T](
+    problems: _Problems,
+    data: dict[str, Any],
+    name: str,
+    build: Callable[[_Problems, str, dict[str, Any]], T | None],
+) -> tuple[T, ...] | None:
+    """Build an array of tables, [[name]], each by `build`; absent means none, and None after reporting a problem.
+
+    A required array that is absent has been reported as missing already.
+    """
+    tables = data.get(name, [])
     if not isinstance(tables, list) or not all(isinstance(t, dict) for t in tables):
-        problems.add("noise", f"expected an array of tables ([[noise]]), found {_kind(tables)}")
+        problems.add(name, f"expected an array of tables ([[{name}]]), found {_kind(tables)}")
         return None
-    built = [_layer(problems, f"noise[{j}]", t) for j, t in enumerate(tables, 1)]
-    layers = tuple(layer for layer in built if layer is not None)
-    if len(layers) < len(built):
-        return None
-    _validate_layers(layers, problems)
-    return layers
+    built = [build(problems, f"{name}[{j}]", t) for j, t in enumerate(tables, 1)]
+    found = tuple(b for b in built if b is not None)
+    return found if len(found) == len(built) else None
 
 
-def _brushes(problems: _Problems, data: dict[str, Any]) -> tuple[Brush, ...] | None:
-    """Build and check the brushes, none when there is no [[brush]]; None after reporting what is wrong."""
-    tables = data.get("brush", [])
-    if not isinstance(tables, list) or not all(isinstance(t, dict) for t in tables):
-        problems.add("brush", f"expected an array of tables ([[brush]]), found {_kind(tables)}")
+def _rim(problems: _Problems, path: str, table: dict[str, Any]) -> Rim | None:
+    """Build a rim; None after reporting what is wrong."""
+    t = _section(problems, path, table, _FIELDS["rim"])
+    if t is None:
         return None
-    built = []
-    for j, table in enumerate(tables, 1):
-        path = f"brush[{j}]"
-        layer = _layer(problems, path, {k: v for k, v in table.items() if k != "sweep"})
-        sweep = None
-        if "sweep" not in table:
-            problems.add(f"{path}.sweep", "missing")
-        else:
-            sweep = _pairs(problems, f"{path}.sweep", table["sweep"], ("ms", "ratio"))
-        built.append(None if layer is None or sweep is None else (layer, sweep))
-    brushes = tuple(Brush(n.level_db, n.band_hz, n.rattle, s, n.amp) for n, s in (b for b in built if b))
-    if len(brushes) < len(built):
+    modes = _pairs(problems, f"{path}.modes", t["modes"], ("hz", "level_db"))
+    amp = _pairs(problems, f"{path}.amp", t["amp"], ("ms", "gain"))
+    if modes is None or amp is None:
         return None
-    _validate_brushes(brushes, problems)
-    return brushes
+    return Rim(_float(t["level_db"]), _float(t["damping"]), modes, amp)
 
 
-def _rims(problems: _Problems, data: dict[str, Any]) -> tuple[Rim, ...] | None:
-    """Build and check the rims, none when there is no [[rim]]; None after reporting what is wrong."""
-    tables = data.get("rim", [])
-    if not isinstance(tables, list) or not all(isinstance(t, dict) for t in tables):
-        problems.add("rim", f"expected an array of tables ([[rim]]), found {_kind(tables)}")
+def _brush(problems: _Problems, path: str, table: dict[str, Any]) -> Brush | None:
+    """Build a brush: a layer's fields and a sweep; None after reporting what is wrong."""
+    layer = _layer(problems, path, {k: v for k, v in table.items() if k != "sweep"})
+    if "sweep" not in table:
+        problems.add(f"{path}.sweep", "missing")
         return None
-    built = []
-    for j, table in enumerate(tables, 1):
-        t = _section(problems, f"rim[{j}]", table, _FIELDS["rim"])
-        modes = amp = None
-        if t is not None:
-            modes = _pairs(problems, f"rim[{j}].modes", t["modes"], ("hz", "level_db"))
-            amp = _pairs(problems, f"rim[{j}].amp", t["amp"], ("ms", "gain"))
-        built.append(None if t is None or modes is None or amp is None else (t, modes, amp))
-    rims = tuple(Rim(_float(t["level_db"]), _float(t["damping"]), m, a) for t, m, a in (b for b in built if b))
-    if len(rims) < len(built):
+    sweep = _pairs(problems, f"{path}.sweep", table["sweep"], ("ms", "ratio"))
+    if layer is None or sweep is None:
         return None
-    _validate_rims(rims, problems)
-    return rims
+    return Brush(layer.level_db, layer.band_hz, layer.rattle, sweep, layer.amp)
 
 
 def _drive(problems: _Problems, data: dict[str, Any]) -> Drive | None:
@@ -668,7 +651,14 @@ def from_dict(data: object) -> Patch:
     body = _body(problems, data["body"]) if "body" in data else None
     if body is not None:
         _validate_body(body, problems)
-    noise, rim, brush = _noise(problems, data), _rims(problems, data), _brushes(problems, data)
+    noise = _tables_of(problems, data, "noise", _layer) if "noise" in data else None
+    rim, brush = _tables_of(problems, data, "rim", _rim), _tables_of(problems, data, "brush", _brush)
+    if noise is not None:
+        _validate_layers(noise, problems)
+    if rim is not None:
+        _validate_rims(rim, problems)
+    if brush is not None:
+        _validate_brushes(brush, problems)
     drive, output = _drive(problems, data), _output(problems, data)
     # Anything missing or unbuilt has been reported, so with no problem every part is there and checked.
     if problems or body is None or noise is None or rim is None or brush is None or drive is None or output is None:
@@ -1186,8 +1176,7 @@ def softer(p: Patch, db: float, glide: float = 2.0, contact: float = 0.2) -> Pat
         return x if x == -math.inf else float(round(_dec(x) - Decimal(repr(float(db))), 6))
 
     def rises(amp: Knots) -> Knots:
-        """Lengthen a shape's rises by contact."""
-        return _lengthen_rises(amp, Decimal(repr(v**-contact))) if contact else amp
+        return _struck_rises(amp, v, contact)
 
     def struck[L: (Layer, Brush)](layer: L) -> L:
         """Strike a layer or a brush softer: its level, its rises and, by contact, its upper band edge."""
@@ -1196,17 +1185,31 @@ def softer(p: Patch, db: float, glide: float = 2.0, contact: float = 0.2) -> Pat
         return dataclasses.replace(layer, level_db=level(layer.level_db), band_hz=band, amp=rises(layer.amp))
 
     b = p.body
-    pitch = b.pitch
-    if glide:
-        scale = Decimal(repr(v**glide))
-        pitch = tuple((ms, float(round(1 + (_dec(r) - 1) * scale, 6))) for ms, r in b.pitch)
     return dataclasses.replace(
         p,
-        body=dataclasses.replace(b, level_db=level(b.level_db), pitch=pitch, amp=rises(b.amp)),
+        body=dataclasses.replace(
+            b,
+            level_db=level(b.level_db),
+            pitch=_struck_glide(b.pitch, v, glide),
+            amp=rises(b.amp),
+        ),
         noise=tuple(struck(layer) for layer in p.noise),
         rim=tuple(dataclasses.replace(r, level_db=level(r.level_db), amp=rises(r.amp)) for r in p.rim),
         brush=tuple(struck(brush) for brush in p.brush),
     )
+
+
+def _struck_rises(amp: Knots, v: float, contact: float) -> Knots:
+    """Lengthen a shape's rises by v^(−contact), as a strike softer by v does."""
+    return _lengthen_rises(amp, Decimal(repr(v**-contact))) if contact else amp
+
+
+def _struck_glide(pitch: Knots, v: float, glide: float) -> Knots:
+    """Scale a pitch curve's excess over 1 by v^glide, as a strike softer by v does, to 6 decimals."""
+    if not glide:
+        return pitch
+    scale = Decimal(repr(v**glide))
+    return tuple((ms, float(round(1 + (_dec(r) - 1) * scale, 6))) for ms, r in pitch)
 
 
 def flam(p: Patch, gap_ms: float, grace_db: float = 12.0, glide: float = 2.0, contact: float = 0.2) -> Patch:
@@ -1225,13 +1228,17 @@ def flam(p: Patch, gap_ms: float, grace_db: float = 12.0, glide: float = 2.0, co
     for name, x, ok in (("--gap", gap_ms, gap_ms > 0), ("--grace", grace_db, grace_db > 0)):
         if not (math.isfinite(x) and ok):
             raise PatchError([f"{name}: must be a positive number, found {x!r}"])
-    grace = softer(p, grace_db, glide, contact)
-    v = Decimal(repr(10 ** (-grace_db / 20)))
+    v = 10 ** (-grace_db / 20)
+    scale = Decimal(repr(v))
+    if round(scale, 6) >= 1:
+        raise PatchError([f"--grace: {grace_db!r} dB is too small for the grace to stay softer, written to 6 decimals"])
     gap = _dec(gap_ms)
 
     def joined(path: str) -> Knots:
         main = curve_knots(p, path)
-        knots = [(ms, float(round(_dec(g) * v, 6))) for ms, g in curve_knots(grace, path)]
+        # Only the grace's shapes and glide are softer's: its levels are written into its shapes, and the bands
+        # are the main stroke's, so no softer patch is built or checked.
+        knots = [(ms, float(round(_dec(g) * scale, 6))) for ms, g in _struck_rises(main, v, contact)]
         start = _dec(main[0][0]) + gap
         curve = amplitude_curve([ms / 1000 for ms, _ in knots], [g for _, g in knots])
         residual = float(round(Decimal(repr(float(curve(float(start) / 1000)))), 6))
@@ -1239,7 +1246,7 @@ def flam(p: Patch, gap_ms: float, grace_db: float = 12.0, glide: float = 2.0, co
         return (*before, (_ms(start), residual), *((_ms(_dec(ms) + gap), g) for ms, g in main[1:]))
 
     peak = _dec(next(ms for ms, g in p.body.amp if g == 1.0))
-    played = grace.body.pitch
+    played = _struck_glide(p.body.pitch, v, glide)
     glided = pitch_curve([ms / 1000 for ms, _ in played], [r for _, r in played])
     pitch = (
         *(k for k in played if _dec(k[0]) <= gap - MIN_SPACING_MS),
