@@ -18,7 +18,7 @@ leave that domain.
 
 The user guide is [docs/GUIDE.md](docs/GUIDE.md): the workflow, every
 control, recipes and how to read the report. How the instrument is made, and
-what it promises, is [docs/DESIGN.md](docs/DESIGN.md). Hear the fifteen references,
+what it promises, is [docs/DESIGN.md](docs/DESIGN.md). Hear the eighteen references,
 with their figures, reports and patches, in
 [docs/references.md](docs/references.md).
 
@@ -60,9 +60,10 @@ halyard pack snare.toml snare-12.toml snare-24.toml --takes 6 --out kit/
 
 A test runs these commands, all but `audition`, in this order.
 
-The fifteen references are `tone`, `crack`, `fat`, `driven`, `clap` and `snap`,
+The eighteen references are `tone`, `crack`, `fat`, `driven`, `clap` and `snap`,
 the genres' `machine`, `house`, `short-clap`, `rim-click`, `big-clap` and
-`long-snare`, and the played end's `rimshot`, `cross-stick` and `brush`.
+`long-snare`, the played end's `rimshot`, `cross-stick` and `brush`, and for
+trance and builds `zap`, `reverse` and `closing`.
 They are matched in loudness (−27 LUFS), peak below −1 dBFS over seeds 1–16,
 and every take of them is inside the validated domain with at least 16 dB of
 drive headroom. They are starting points: their names never select hidden
@@ -248,7 +249,7 @@ uv run python -m tools.grid run --k 32 --workers 6  # the adversarial grid, abou
 uv run python -m tools.grid analyze docs/grid/k16.csv docs/grid/k32.csv
 uv run python -m tools.headroom run --dense      # the report's drive headroom against full renders (about 20 minutes on 12 cores)
 uv run python -m tools.headroom analyze docs/grid/headroom.csv
-uv run python -m tools.references                # the fifteen references over seeds 1–16
+uv run python -m tools.references                # the eighteen references over seeds 1–16
 uv run python -m tools.bench                     # render time and memory on this machine
 uv run python -m tools.sfz_players prepare DIR   # a pack and notes; then tools/sfz_players.sh DIR (Docker)
 uv run python -m tools.sfz_players check DIR     # and what sfizz and liquidsfz played
@@ -276,7 +277,7 @@ sample-replacement benchmark.
 | `src/halyard_synth/wav.py` | RIFF writing and reading, float and PCM |
 | `src/halyard_synth/audition.py` | hits on the beat grid, patches and takes cycling, beds, A/B and blind order, watching, playback |
 | `src/halyard_synth/cli.py` | commands |
-| `src/halyard_synth/data/` | frozen decimators and checksums, the fifteen references |
+| `src/halyard_synth/data/` | frozen decimators and checksums, the eighteen references |
 
 ## Status
 

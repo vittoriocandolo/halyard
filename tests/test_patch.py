@@ -727,17 +727,20 @@ def close(p: patch.Patch, q: patch.Patch) -> None:
 
     One edit keeps every knot within 0.5 µs of its exact place. A second edit
     lengthens the rises as written, each up to 1 µs off, so a knot may move by
-    up to 1 µs more for every rise before it.
+    up to 1 µs more for every rise before it; and it scales the first edit's
+    rounding of a knot inside a rise by up to its factor, 1.5 at 18 dB, so such
+    a knot may move by 1 µs more.
     """
     assert p.body.level_db == pytest.approx(q.body.level_db, abs=2e-6)
     for (m1, r1), (m2, r2) in zip(p.body.pitch, q.body.pitch, strict=True):
         assert m1 == m2
         assert r1 == pytest.approx(r2, abs=2e-6)
     for a, b in zip(sources(p), sources(q), strict=True):
-        ends = [j for _, j in patch.rises([g for _, g in b.amp])]
+        spans = patch.rises([g for _, g in b.amp])
         for k, ((m1, g1), (m2, g2)) in enumerate(zip(a.amp, b.amp, strict=True)):
-            before = sum(j < k for j in ends)
-            assert m1 == pytest.approx(m2, abs=1e-3 * (1.001 + before))
+            before = sum(j < k for _, j in spans)
+            inside = any(i < k < j for i, j in spans)
+            assert m1 == pytest.approx(m2, abs=1e-3 * (1.001 + before + inside))
             assert g1 == g2
     for a, b in zip(p.noise, q.noise, strict=True):
         assert a.level_db == pytest.approx(b.level_db, abs=2e-6)

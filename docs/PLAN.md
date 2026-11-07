@@ -30,7 +30,7 @@ The instrument now serves a declared musical aim: producers whose tracks are led
 | A brush: one `[[brush]]`, a noise layer whose band moves by a sweep of up to an octave (§2.4) | Brushes sweep across the head. One noise blended by a cubic B-spline across third-octave copies keeps the written band's shape within 0.5 dB and its level within 0.1 dB all along the sweep, measured on random bands; the blend is C², so the kink bound gains the sweep's knots and the crossings where B‴ steps |
 | `flam` and `roll`: softer strokes before the main one, as ordinary knots; `stack`: two hits in one patch (§4) | A flam is played, and producers program it; like `bursts`, it adds no parameter |
 | `[takes]`: each take struck harder or softer and its later rises moved, drawn from the seed under `snare/takes/v1` (§2.7) | Round robins of a played drum differ in more than their noise |
-| Nine more references, fifteen in all (§1, §8.4) | The genres' hits and the played end: `machine`, `house`, `short-clap`, `rim-click`, `big-clap`, `long-snare`, `rimshot`, `cross-stick` and `brush`, measured like the six |
+| Twelve more references, eighteen in all (§1, §8.4) | The genres' hits, the played end, and trance and builds: `machine`, `house`, `short-clap`, `rim-click`, `big-clap`, `long-snare`, `rimshot`, `cross-stick`, `brush`, `zap`, `reverse` and `closing`, measured like the six |
 
 Both new sources are optional arrays: a patch without them reads and renders as before, so the schema stays 1 for the first release. Acoustic realism stays outside: these are synthesized rimshots, cross-sticks and brushes, not models of a shell, a stick or a room.
 
@@ -108,7 +108,7 @@ The instrument has one voice. A modal body and up to four noise layers are summe
 
 It is built for producers and sound designers who program snares and claps in a DAW or a sampler. It renders one-shots, sets of round-robin takes, and velocity-layered packs that a sampler plays.
 
-Its family is synthesized snares and claps: tonal electronic snares, tight bright snares, big modern snares, driven snares, claps, snaps and electronic rim clicks, and, at the played end, synthesized rimshots, cross-sticks and brushes. Fifteen reference patches define acceptance:
+Its family is synthesized snares and claps: tonal electronic snares, tight bright snares, big modern snares, driven snares, claps, snaps and electronic rim clicks, and, at the played end, synthesized rimshots, cross-sticks and brushes. Eighteen reference patches define acceptance:
 
 - **Tone:** two tonal modes and a soft click over bright snappy noise; round and clearly pitched.
 - **Crack:** a quick glide, a sharp click and bright wires with a short decay; tight.
@@ -125,6 +125,9 @@ Its family is synthesized snares and claps: tonal electronic snares, tight brigh
 - **Rimshot:** the hoop ringing over a hard hit on the head; the played end.
 - **Cross-stick:** the stick's shoulder knocking the rim, the head barely moving.
 - **Brush:** a swish across the head, the wires answering, under a soft tap.
+- **Zap:** one mode falling three octaves to its tuning in 40 ms; trance and electro.
+- **Reverse:** a swell rising for 390 ms and cut on the beat, brightening as it rises; builds.
+- **Closing:** a synth snare whose noise band closes an octave as it decays, a filter envelope as knots.
 
 These are starting patches. Their names never select hidden algorithms.
 
@@ -462,7 +465,7 @@ There are three separate promises, as in the kick:
 
 - **Valid domain.** What the parser accepts. The renderer promises defined, finite output with bounded time and memory.
 - **Validated domain.** Where the numerical criteria of §8 are demonstrated.
-- **Voiced regions.** The recorded neighbourhoods of the fifteen references, where musical usefulness is promised.
+- **Voiced regions.** The recorded neighbourhoods of the eighteen references, where musical usefulness is promised.
 
 "Excellent everywhere" is not claimed. The hard limits are:
 

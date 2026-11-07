@@ -42,6 +42,9 @@ REFERENCES = (
     "rimshot",
     "cross-stick",
     "brush",
+    "zap",
+    "reverse",
+    "closing",
 )
 BEATS_PER_BAR = 4
 

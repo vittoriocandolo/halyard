@@ -41,6 +41,9 @@ patch of any exported file, take included.
 | `rimshot` | The hoop ringing over a hard hit on the head | the rim's level and damping |
 | `cross-stick` | The stick's shoulder knocking the rim, the head barely moving | the rim's damping and frequencies, the body's level |
 | `brush` | A swish across the head, the wires answering, under a soft tap | the sweep's knots, `stretch brush[1].sweep` |
+| `zap` | One mode falling three octaves to its tuning in 40 ms; trance and electro | the glide's first ratio, `stretch body.pitch` |
+| `reverse` | A swell rising for 390 ms and cut on the beat, brightening as it rises; builds | `stretch all` to fit the build, the sweep's start |
+| `closing` | A synth snare whose noise band closes an octave as it decays | how far the sweep falls, `stretch brush[1].sweep` |
 
 They are matched in loudness (−27 LUFS) so you can compare them fairly, and
 they peak below −1 dBFS. Raise `output.db` as you need. Hear each one, with
@@ -444,6 +447,9 @@ track decide the rest.
 | `rimshot` | `house` | +4.8 dB | |
 | `cross-stick` | `house` | +4.8 dB | |
 | `brush` | `house` | +4.8 dB | |
+| `zap` | `trance` | +3.5 dB | |
+| `reverse` | `trance` | +3.4 dB | |
+| `closing` | `house` | +4.8 dB | |
 
 ## From Python
 

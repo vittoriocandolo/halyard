@@ -36,10 +36,11 @@ The first public release.
   checked against one at 256.
 - Frozen minimum-phase decimators for the 44.1 and 48 kHz families, verified
   by checksum.
-- Fifteen references to start from, matched in loudness: `tone`, `crack`,
+- Eighteen references to start from, matched in loudness: `tone`, `crack`,
   `fat`, `driven`, `clap` and `snap`; for house, tech house and trance,
   `machine`, `house`, `short-clap`, `rim-click`, `big-clap` and `long-snare`;
-  and at the played end, `rimshot`, `cross-stick` and `brush`.
+  at the played end, `rimshot`, `cross-stick` and `brush`; and for trance and
+  builds, `zap`, `reverse` and `closing`.
 - Patches in TOML, read as UTF-8 or UTF-16, with every field required, every
   problem reported with its field path, and a canonical form.
 - Editing commands that print a complete patch: `tune` to a note or a

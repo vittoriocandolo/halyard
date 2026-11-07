@@ -354,3 +354,44 @@ def test_slow_the_sweep() -> None:
         return float(starts[np.argmax([centroid(x, s, 40) for s in starts])])
 
     assert brightest_ms(audio(slower)) > brightest_ms(audio(p)) + 30
+
+
+# From trance and builds.
+
+
+def dominant_hz(x: Floats, start_ms: float, length_ms: float) -> float:
+    """Return a window's loudest frequency."""
+    f, power = spectrum(faded(x, start_ms, length_ms))
+    return float(f[np.argmax(power)])
+
+
+def test_shorten_the_zap() -> None:
+    """Shorten the zap's fall with one command: higher still 15 ms in, where the written fall has nearly landed."""
+    p = ref("zap")
+    quicker = patch.stretch(p, "body.pitch", 2.0)  # one command: a fall twice as long
+    assert dominant_hz(audio(quicker), 12, 8) > 1.2 * dominant_hz(audio(p), 12, 8)
+
+
+def test_start_the_zap_lower() -> None:
+    """Start the zap's fall an octave lower with one field."""
+    p = ref("zap")
+    lower = edit(p, **{"body.pitch[1].ratio": p.body.pitch[0][1] / 2})  # one field
+    assert dominant_hz(audio(lower), 0, 2) < 0.8 * dominant_hz(audio(p), 0, 2)
+
+
+def test_fit_the_reverse_to_a_shorter_build() -> None:
+    """Fit the reverse snare to a shorter build with one command: its swell peaks sooner."""
+    p = ref("reverse")
+    shorter = patch.stretch(p, "all", 0.5, after_ms=0.0)  # one command
+
+    def peak_ms(x: Floats) -> float:
+        return 1000 * float(np.argmax(np.abs(x))) / RATE
+
+    assert peak_ms(audio(shorter)) < 0.6 * peak_ms(audio(p))
+
+
+def test_close_the_snare_slower() -> None:
+    """Close the synth snare's band slower with one command: brighter 100 ms in."""
+    p = ref("closing")
+    slower = patch.stretch(p, "brush[1].sweep", 2.0)  # one command
+    assert centroid(audio(slower), 80, 40) > 1.1 * centroid(audio(p), 80, 40)

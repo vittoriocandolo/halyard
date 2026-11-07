@@ -8,4 +8,5 @@ dist/
 .coverage
 *.wav
 !tests/golden/*.wav
+!docs/audio/*.wav
 renders/
