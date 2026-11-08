@@ -236,6 +236,40 @@ def test_the_command_writes_a_pack(ladder: list[Path], tmp_path: Path, capsys: p
     assert "not softer" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    ("name", "holds"),
+    [
+        ("snare\n<region> sample=other.wav key=1", "U+000A < > ="),
+        ("snare $KEY", "$"),
+        ("snare // old", "//"),
+        ("snare /* old", "/*"),
+        ("snare\\..", "\\"),
+        ("snare\u2028two", "U+2028"),
+    ],
+)
+def test_packs_refuse_names_a_map_would_misread(ladder: list[Path], name: str, holds: str) -> None:
+    """Refuse a layer or pack name that would add to, or break, the SFZ map it is written in."""
+    loud = loads(ladder[0].read_text(encoding="utf-8"))
+    with pytest.raises(pack.PackError, match=re.escape(f"it holds {holds};")):
+        pack.build([(name, loud)])
+    with pytest.raises(pack.PackError, match="a sampler trims the space around it"):
+        pack.build([("snare", loud)], stem=" snare")
+
+
+def test_the_command_refuses_a_patch_named_to_misread(
+    ladder: list[Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Run `halyard pack` on a file named to add a region to the map, and write nothing."""
+    evil = tmp_path / "snare\n<region> sample=other.wav key=1.toml"
+    evil.write_text(ladder[0].read_text(encoding="utf-8"), encoding="utf-8")
+    code = cli.main(["pack", str(evil), "--out", str(tmp_path / "kit")])
+    assert code == cli.CliError("").status
+    assert "cannot name a file in an SFZ map" in capsys.readouterr().err
+    assert not (tmp_path / "kit").exists()
+
+
 def test_no_velocity_plays_a_take_louder_than_it_was_rendered(ladder: list[Path]) -> None:
     """Find every curve at most 1 and no group volume, even for layers 18 dB apart: the map only lowers."""
     loud = loads(ladder[0].read_text(encoding="utf-8"))

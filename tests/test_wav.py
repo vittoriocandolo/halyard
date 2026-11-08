@@ -359,6 +359,11 @@ def test_every_file_the_reader_refuses_is_named(tmp_path: Path) -> None:
         ("nodata.wav", riff((b"fmt ", fmt)), "missing fmt or data chunk"),
         ("12bit.wav", riff((b"fmt ", odd_bits), (b"data", b"\0\0")), "unsupported format, 12-bit samples in 1 channel"),
         ("empty.wav", riff((b"fmt ", no_channels), (b"data", b"")), "unsupported format, 16-bit samples in 0 channels"),
+        ("cutfmt.wav", riff((b"fmt ", fmt[:2]), (b"data", b"\0\0")), "a fmt or smpl chunk is cut short"),
+        ("cutsmpl.wav", riff((b"fmt ", fmt), (b"data", b"\0\0"), (b"smpl", b"\0")), "a fmt or smpl chunk is cut short"),
+        ("garbled.wav", riff((b"fmt ", fmt), (b"data", b"\0\0"), (wav.PRIVATE, b"{")), "the embedded patch is damaged"),
+        ("deep.wav", riff((b"fmt ", fmt), (b"data", b"\0\0"), (wav.PRIVATE, b"[" * 100_000)), "patch is damaged"),
+        ("list.wav", riff((b"fmt ", fmt), (b"data", b"\0\0"), (wav.PRIVATE, b"[1]")), "the embedded patch is damaged"),
     ):
         path = tmp_path / name
         path.write_bytes(data)

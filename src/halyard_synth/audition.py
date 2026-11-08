@@ -127,6 +127,9 @@ def load_audio(path: Path_) -> tuple[int, Floats]:
         msg = f"{path}: {e}"
         raise AuditionError(msg) from None
     x = w.as_float()
+    if not np.all(np.isfinite(x)):  # a device turns NaN and infinity into anything up to full scale
+        msg = f"{path}: holds samples that are not numbers or are infinite"
+        raise AuditionError(msg)
     return w.rate, x if x.ndim == STEREO else x[:, None]
 
 

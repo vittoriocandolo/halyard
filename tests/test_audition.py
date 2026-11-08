@@ -487,6 +487,8 @@ def test_a_session_refuses_what_it_cannot_play_faithfully(tmp_path: Path, exampl
         ({"against": silent}, "the sample is silent"),
         ({"blind": True}, "--blind needs --against"),
         ({"against": tmp_path / "missing.wav"}, "missing.wav"),
+        ({"against": write_wav(tmp_path / "nan.wav", np.full(4800, np.nan), 48000)}, "not numbers or are infinite"),
+        ({"bpm": 120.0, "bed": write_wav(tmp_path / "inf.wav", np.full(96000, np.inf), 48000)}, "are infinite"),
     ):
         with pytest.raises(audition.AuditionError, match=message):
             audition.Session(example, audition.Settings(**kwargs), out=Collect([]))

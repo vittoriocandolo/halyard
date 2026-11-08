@@ -267,6 +267,31 @@ def test_verify(capsys: pytest.CaptureFixture[str], example: Path) -> None:
     assert "2 of 2 takes pass" in out
 
 
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        (b"{", "the embedded patch is damaged"),
+        (b"[" * 100_000, "the embedded patch is damaged"),
+        (b'{"patch": 5}', "the embedded patch is damaged"),
+        (b'{"patch": "\\u001b]52;c;cHduZWQ=\\u0007"}', "holds control characters (U+0007, U+001B)"),
+        (b'{"patch": "# snare\\u009b2J"}', "holds control characters (U+009B)"),
+    ],
+)
+def test_extract_prints_only_an_intact_patch(
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    body: bytes,
+    message: str,
+) -> None:
+    """Refuse a chunk that is garbled, nested to exhaust the parser or not text, or text a terminal would act on."""
+    chunk = wav.PRIVATE + len(body).to_bytes(4, "little") + body + b"\0" * (len(body) % 2)
+    path = tmp_path / "odd.wav"
+    path.write_bytes(b"RIFF" + (4 + len(chunk)).to_bytes(4, "little") + b"WAVE" + chunk)
+    code, out, err = run(capsys, "extract", path)
+    assert (code, out) == (BAD_INPUT, "")
+    assert message in err
+
+
 def test_extract_refuses_what_is_not_a_wave_file(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     """Refuse to extract from a file that is not RIFF WAVE, or is not there."""
     text = tmp_path / "notes.txt"

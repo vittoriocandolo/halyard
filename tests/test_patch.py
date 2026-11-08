@@ -460,6 +460,12 @@ def test_all_problems_are_reported_together() -> None:
     assert len(found) == PROBLEMS
 
 
+def test_toml_nested_to_exhaust_the_parser_is_a_patch_error() -> None:
+    """Parse arrays nested a hundred thousand deep, and get a patch error rather than a crash."""
+    with pytest.raises(PatchError, match="nested too deeply to be a patch"):
+        loads("x = " + "[" * 100_000 + "]" * 100_000 + "\n")
+
+
 def test_toml_syntax_errors_are_patch_errors() -> None:
     """Report broken TOML as a patch problem."""
     assert problems(loads, 'instrument = "snare"\nschema = 1\n[body\n')[0].startswith("TOML:")

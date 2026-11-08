@@ -23,6 +23,7 @@ import multiprocessing
 import os
 import sys
 import time
+import unicodedata
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,27 @@ UNEVEN_DB = 1.0  # a take spread over this suggests level matching
 
 class PackError(RuntimeError):
     """A pack that cannot be built, with what to change."""
+
+
+SFZ_SYNTAX = ("<", ">", "=", "$", "\\", "//", "/*")  # what a sampler reads as syntax even inside a sample's name
+
+
+def sfz_name_problem(name: str) -> str | None:
+    """Return why `name` cannot stand for itself in an SFZ map, or None when it can.
+
+    A sampler reads a map line by line: `<` opens a header, `word=` an opcode,
+    `$` a variable, `//` and `/*` a comment and a backslash a folder, and the
+    space around a value is trimmed. A name holding any of these, a control
+    character or a line break would be read as something else: a crafted file
+    name could add regions or opcodes to the map.
+    """
+    breaks = sorted({f"U+{ord(c):04X}" for c in name if unicodedata.category(c) in {"Cc", "Zl", "Zp"}})
+    found = [*breaks, *(s for s in SFZ_SYNTAX if s in name)]
+    if found:
+        return f"{name!r} cannot name a file in an SFZ map: it holds {' '.join(found)}; rename it"
+    if name != name.strip():
+        return f"{name!r} cannot name a file in an SFZ map: a sampler trims the space around it; rename it"
+    return None
 
 
 @dataclass(frozen=True)
@@ -283,6 +305,9 @@ def build(
     if not patches:
         msg = "a pack needs at least one patch"
         raise PackError(msg)
+    names = dict.fromkeys([stem or patches[0][0], *(name for name, _ in patches)])
+    if unnamable := [problem for name in names if (problem := sfz_name_problem(name))]:
+        raise PackError("\n".join(unnamable))
     check_outputs(patches)
     first = patches[0][1]
     outs, peaks, doms = _render(patches, options.takes, workers)

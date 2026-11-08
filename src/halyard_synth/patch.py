@@ -710,6 +710,8 @@ def loads(text: str) -> Patch:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:
         raise PatchError([f"TOML: {e}"]) from None
+    except RecursionError:  # arrays or tables nested deeper than any patch, made to exhaust the parser
+        raise PatchError(["TOML: nested too deeply to be a patch"]) from None
     return from_dict(data)
 
 

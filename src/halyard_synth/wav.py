@@ -36,6 +36,8 @@ EXTENSIBLE_FMT = 40  # the size of an extensible fmt chunk, which holds that GUI
 PCM16, PCM24 = 16, 24
 HEADER = 12  # "RIFF", the size and "WAVE"
 PRIVATE = b"snar"
+FMT = 16  # the bytes of a plain fmt chunk
+SMPL = 36  # the bytes of a smpl chunk up to its first loop
 
 
 class Format(NamedTuple):
@@ -155,6 +157,9 @@ def read(path: str | os.PathLike[str]) -> Wav:
     if b"fmt " not in found or b"data" not in found:
         msg = f"{path}: missing fmt or data chunk"
         raise ValueError(msg)
+    if len(found[b"fmt "]) < FMT or len(found.get(b"smpl", bytes(SMPL))) < SMPL:
+        msg = f"{path}: a fmt or smpl chunk is cut short"
+        raise ValueError(msg)
     tag, channels, rate, _, _, bits = struct.unpack_from("<HHIIHH", found[b"fmt "])
     if tag == EXTENSIBLE and len(found[b"fmt "]) >= EXTENSIBLE_FMT:
         tag = struct.unpack_from("<H", found[b"fmt "], 24)[0]
@@ -178,5 +183,17 @@ def read(path: str | os.PathLike[str]) -> Wav:
     if channels > 1:
         samples = samples.reshape(-1, channels)
     root = struct.unpack_from("<9I", found[b"smpl"])[3:5] if b"smpl" in found else None
-    meta = json.loads(found[PRIVATE].decode("utf-8")) if PRIVATE in found else None
+    meta = embedded(found[PRIVATE]) if PRIVATE in found else None
+    if PRIVATE in found and meta is None:
+        msg = f"{path}: the embedded patch is damaged"
+        raise ValueError(msg)
     return Wav(rate, samples, root, meta, pcm, channels)
+
+
+def embedded(chunk: bytes) -> dict[str, Any] | None:
+    """Return the table a private chunk holds, or None when it is truncated, garbled or nested to exhaust the parser."""
+    try:
+        meta = json.loads(chunk.decode("utf-8"))
+    except (ValueError, RecursionError):
+        return None
+    return meta if isinstance(meta, dict) else None

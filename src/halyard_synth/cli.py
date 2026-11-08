@@ -9,9 +9,9 @@ The editing commands, tune | stretch | bursts | softer | flam | roll | stack, pr
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import sys
+import unicodedata
 from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -203,8 +203,26 @@ def cmd_extract(args: argparse.Namespace) -> int:
     if wav.PRIVATE not in found:
         msg = f"{args.wav}: no embedded snare patch"
         raise CliError(msg)
-    sys.stdout.write(json.loads(found[wav.PRIVATE].decode("utf-8"))["patch"])
+    meta = wav.embedded(found[wav.PRIVATE])
+    text = meta.get("patch") if meta is not None else None
+    if not isinstance(text, str):
+        msg = f"{args.wav}: the embedded patch is damaged"
+        raise CliError(msg)
+    if controls := _controls(text):
+        msg = f"{args.wav}: the embedded patch holds control characters ({controls}), which no patch does; not printed"
+        raise CliError(msg)
+    sys.stdout.write(text)
     return 0
+
+
+def _controls(text: str) -> str:
+    """Return the control characters in `text` other than tab and line ends, as code points, or "" for none.
+
+    TOML allows none of C0 in a patch, and a terminal acts on them and on C1
+    rather than showing them, so text from a file holding them is never printed.
+    """
+    found = sorted({c for c in text if unicodedata.category(c) == "Cc" and c not in "\t\n\r"})
+    return ", ".join(f"U+{ord(c):04X}" for c in found)
 
 
 def cmd_audition(args: argparse.Namespace) -> int:

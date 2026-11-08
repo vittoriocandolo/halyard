@@ -20,7 +20,8 @@ read what a render reports. The design and its evidence are in
 5. **Pack them with takes for the sampler.** `halyard pack snare.toml snare-8.toml snare-16.toml snare-24.toml --takes 6 --out kit/`.
 
 Every file is exact and reproducible: `halyard extract` gives back the exact
-patch of any exported file, take included.
+patch of any exported file, take included. It never prints text holding
+control characters, which no patch does and a terminal would act on.
 
 ## The references
 
@@ -381,7 +382,10 @@ N takes (take j of a layer plays its seed + j − 1).
 - Every file of the pack shares one gain, so the layers keep their natural
   levels.
 - Files are named `<stem>_v<top velocity>_rr<take>.wav`, so they also map by
-  hand in samplers without SFZ.
+  hand in samplers without SFZ. A patch whose file name a sampler would read
+  as part of the map, one holding `<`, `>`, `=`, `$`, a backslash, a
+  comment's start, a control character or a line break, or beginning or
+  ending with a space, is refused: rename it.
 - `<stem>.sfz` maps them. Velocity follows a square law, 40·log₁₀(v/127) dB:
   a layer's velocities run up to its own, where the law reaches its loudness
   relative to the loudest, and its group carries a curve point at every
