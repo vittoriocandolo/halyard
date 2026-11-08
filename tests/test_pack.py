@@ -6,7 +6,11 @@
 import dataclasses
 import itertools
 import math
+import multiprocessing
 import re
+from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing.context import BaseContext
 from pathlib import Path
 
 import numpy as np
@@ -315,3 +319,30 @@ def test_a_layer_is_as_loud_as_its_takes_together_and_takes_that_vary_refuse_mat
         pack.build(varied, pack.Options(2, level_match=True))
     played = pack.build(varied, pack.Options(2))
     assert played.layers[0].loudness > played.layers[1].loudness
+
+
+def test_workers_start_fresh_never_forked_from_the_caller(ladder: list[Path], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pack two layers on two workers, started by a fork server or fresh, never by forking this process.
+
+    A worker forked from here would inherit any lock a thread of this process holds, such as the table cache's,
+    without the thread that would release it, and wait on it forever.
+    """
+    loud = loads(ladder[0].read_text(encoding="utf-8"))
+    started: list[tuple[int, str]] = []
+
+    def watched(
+        workers: int,
+        *,
+        mp_context: BaseContext,
+        initializer: Callable[[int], None],
+        initargs: tuple[int],
+    ) -> ProcessPoolExecutor:
+        started.append((workers, mp_context.get_start_method()))
+        return ProcessPoolExecutor(workers, mp_context=mp_context, initializer=initializer, initargs=initargs)
+
+    monkeypatch.setattr(pack, "ProcessPoolExecutor", watched)
+    layers = [("loud", loud), ("soft", softer(loud, 12))]
+    pk = pack.build(layers, pack.Options(2), workers=len(layers))
+    fresh = "forkserver" if "forkserver" in multiprocessing.get_all_start_methods() else "spawn"
+    assert started == [(len(layers), fresh)]
+    assert len(pk.layers) == len(layers)

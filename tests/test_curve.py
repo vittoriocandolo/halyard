@@ -235,6 +235,8 @@ def test_derivatives_match_independent_hermite() -> None:
         scale2 = scale / np.min(np.diff(t)) * 10
         np.testing.assert_allclose(c.second(x), spline.derivative(2)(x), rtol=1e-8, atol=1e-9 * scale2)
         assert np.all(c.second(np.array([t[0] - 1.0, t[-1], t[-1] + 1.0])) == 0)
+        knots = t[1:-1]  # where it jumps: the segment starting there, as a piecewise polynomial reads it too
+        np.testing.assert_allclose(c.second(knots), spline.derivative(2)(knots), rtol=1e-8, atol=1e-9 * scale2)
 
 
 def test_jumps_are_the_one_sided_derivative_differences() -> None:
