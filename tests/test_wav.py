@@ -351,6 +351,7 @@ def test_every_file_the_reader_refuses_is_named(tmp_path: Path) -> None:
     fmt = struct.pack("<HHIIHH", wav.PCM, 1, RATE, 2 * RATE, 2, 16)
     odd_bits = struct.pack("<HHIIHH", wav.PCM, 1, RATE, 2 * RATE, 2, 12)
     no_channels = struct.pack("<HHIIHH", wav.PCM, 0, RATE, 0, 0, 16)
+    no_rate = struct.pack("<HHIIHH", wav.PCM, 1, 0, 0, 2, 16)
     for name, data, message in (
         ("text.wav", b"not a wave file", "not a RIFF WAVE file"),
         ("short.wav", b"RIFF", "not a RIFF WAVE file"),
@@ -359,6 +360,7 @@ def test_every_file_the_reader_refuses_is_named(tmp_path: Path) -> None:
         ("nodata.wav", riff((b"fmt ", fmt)), "missing fmt or data chunk"),
         ("12bit.wav", riff((b"fmt ", odd_bits), (b"data", b"\0\0")), "unsupported format, 12-bit samples in 1 channel"),
         ("empty.wav", riff((b"fmt ", no_channels), (b"data", b"")), "unsupported format, 16-bit samples in 0 channels"),
+        ("0hz.wav", riff((b"fmt ", no_rate), (b"data", b"\0\0")), "16-bit samples in 1 channel at 0 Hz"),
         ("cutfmt.wav", riff((b"fmt ", fmt[:2]), (b"data", b"\0\0")), "a fmt or smpl chunk is cut short"),
         ("cutsmpl.wav", riff((b"fmt ", fmt), (b"data", b"\0\0"), (b"smpl", b"\0")), "a fmt or smpl chunk is cut short"),
         ("garbled.wav", riff((b"fmt ", fmt), (b"data", b"\0\0"), (wav.PRIVATE, b"{")), "the embedded patch is damaged"),

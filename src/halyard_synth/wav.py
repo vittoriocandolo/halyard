@@ -165,8 +165,11 @@ def read(path: str | os.PathLike[str]) -> Wav:
         tag = struct.unpack_from("<H", found[b"fmt "], 24)[0]
     raw = found[b"data"]
     frame = channels * bits // 8 if bits % 8 == 0 and channels > 0 else 0
-    if not frame:
-        msg = f"{path}: unsupported format, {bits}-bit samples in {channels} channel{'' if channels == 1 else 's'}"
+    if not frame or not rate:
+        msg = (
+            f"{path}: unsupported format, {bits}-bit samples in {channels} channel{'' if channels == 1 else 's'} "
+            f"at {rate} Hz"
+        )
         raise ValueError(msg)
     raw = raw[: len(raw) // frame * frame]
     samples: NDArray[Any]
