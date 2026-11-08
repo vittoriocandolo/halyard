@@ -20,9 +20,10 @@ figure below came out the same to the digit: no error changed by more than
 identical. Only the 512 × base check covers 96 fixtures instead of 90. The 32×
 grid took 0.56 CPU-hours, 3 minutes on the Oryon, and the brute force 92,524
 full renders. With rims and brushes (plan revision 5) the grid grew to
-1,441 fixtures, and both files now hold a fresh run of all of them on the same
-machine, in which the first 957 came out exactly as before: 10 minutes for the
-grid on 6 workers, 27 minutes for the brute force on 12.
+1,490 fixtures, with the 176.4 and 192 kHz exports and takes that differ, and
+both files now hold a fresh run of all of them on the same machine, in which
+the first 957 came out exactly as before: 17 minutes for the grid and 46 for
+the brute force, each on 6 workers.
 
 ## Numerical criteria (§8.1)
 
@@ -43,9 +44,9 @@ this machine.
 | Drive | Identities | 0 dB is the identity; S(±1) = ±1 exactly; odd by construction; small-signal gain 10^(drive/20) to 10⁻⁶ at x = 10⁻⁹; S′ and S″ match numerical derivatives. |
 | Dynamics | `softer` on every reference, ladders of 0–36 dB: levels, glide v², rises v^(−1/5), upper edges v^(1/5), curves exact to 10⁻¹², composition | Every rule holds on all eighteen references at 0, 6, … 36 dB, up to the decimals written (1 µs, 10⁻⁶ in ratio, 0.1 Hz). Each rewritten segment is the original read at a linearly mapped time to 10⁻¹² (bursts included), and the glide's excess scales on the whole curve to 10⁻¹⁵. `softer` by a then b equals a + b within the written rounding: a knot may move by 1 µs more for every rise before it, and 1 µs more inside a rise, whose first rounding the second edit scales. |
 | Decimators | Frozen coefficients, as the kick | See the decimator table below. |
-| Kink bound | Never exceeded by the measured error on an undriven grid fixture | Never exceeded, at 16× and 32×: on 450 undriven fixtures at 32× it sits 5.4–45.0 dB above the measured error (median 12.0 dB). Under drive it is never exceeded either (below). |
+| Kink bound | Never exceeded by the measured error on an undriven grid fixture | Never exceeded, at 16× and 32×: on 458 undriven fixtures at 32× it sits 5.4–45.0 dB above the measured error (median 12.1 dB). Under drive it is never exceeded either (below). |
 | Rendering accuracy | E_max and E_rel ≤ −100 dB for every fixture inside the validated domain | All 654 fixtures inside at 32× pass; the worst is −113.9 dB (below). |
-| Drive headroom | The report's value against full renders on every grid fixture; dense 0.05 dB scans on a subset | Never optimistic beyond the brute force's 0.00001 dB resolution, on 1,441 fixtures and 142,540 full renders; no change of status between the candidates in 267 dense scans (below). |
+| Drive headroom | The report's value against full renders on every grid fixture; dense 0.05 dB scans on a subset | Never optimistic beyond the brute force's 0.00001 dB resolution, on 1,490 fixtures and 146,464 full renders; no change of status between the candidates in 269 dense scans (below). |
 | Loudness | EBU Tech 3341; K-weighting against BS.1770's 48 kHz table | The 48 kHz coefficients match to 8.9·10⁻¹⁶, and the other rates match its response within 0.008 dB: the high-pass's numerator is scaled to the 48 kHz passband gain, which the standard's 1, −2, 1 would otherwise let drift by up to 0.032 dB at 192 kHz. The −23 dBFS 1 kHz sine reads −22.99 LUFS at all six rates. |
 | True peak | The crest of the output's band-limited reconstruction, within 10⁻⁷; a true-peak target reached exactly | Against the reconstruction evaluated directly a thousandth of an internal sample apart, Hann-shaped sines at 1, 12 and 19.9 kHz in any phase read within 7.6·10⁻⁸ (on the Oryon). `true-peak` mode puts the true peak at its target to 10⁻⁹ dB. |
 | Export | Independent readers; takes carry their seed, gains and patch; PCM reads back exactly; TPDF dither; never full scale | soundfile, `scipy.io.wavfile`, Python's `wave` and an independent chunk walker read identical samples and headers. Each take's `snar` chunk holds its own patch (its seed) and its gains, and its samples follow from them. `smpl` is left out when the body is silent. The dither is triangular (KS), bit-identical per seed and prefix-stable, keeps exact zeros, and leaves an error power of 1/4 LSB² at every offset between steps. |
@@ -94,18 +95,18 @@ same frozen decimator, at unity gain, with no time shift or gain matching. A
 reference counts only if it agrees with the 256 × base render to −120 dB
 (10⁻⁸ absolute for near-silent fixtures), 20 dB below the threshold.
 
-- 1,229 of the 1,441 grid references converged, with a median agreement of
+- 1,276 of the 1,490 grid references converged, with a median agreement of
   −201 dB.
-- The 512 × base check (24.6 MHz) on 144 fixtures agreed at least as well as
+- The 512 × base check (24.6 MHz) on 149 fixtures agreed at least as well as
   the 128/256 pair in every case.
-- The 212 unconverged references all have drive ≥ 12 dB and are extreme
+- The 214 unconverged references all have drive ≥ 12 dB and are extreme
   corners, such as four layers at +24 dB or noise at +24 dB under 48 dB of
   drive. Their saturated signal still aliases at 12.3 MHz. The rule puts none
   of them inside.
 
 ## The adversarial grid (§8.3)
 
-`tools/grid.py` builds 1,441 fixtures from combined corners, not one knob at
+`tools/grid.py` builds 1,490 fixtures from combined corners, not one knob at
 a time, and runs each at 32× (`docs/grid/k32.csv`). The first 957, before
 rims and brushes, also ran at 16× (`docs/grid/k16.csv`), which chose K.
 
@@ -120,22 +121,23 @@ rims and brushes, also ran at 16× (`docs/grid/k16.csv`), which chose K.
 | snaps | 27 | a single mode at 1, 2 and 4 kHz under bursts of 1, 10 and 30 ms × drive |
 | rims | 197 | a single mode at 100 Hz, a four-mode hoop, two modes at 19–20 kHz, or eight modes over 1–17.8 kHz × rises of 10 µs, 50 µs and 1 ms × damping 0 and the most the 512 limit allows (3, or 2.16 for the eight modes) × 0 and +12 dB × drive 0–36 dB; two rims over the body and wires × drive |
 | brushes | 144 | wires, stick, clap and the narrowest bands × a slow sweep, a fast one (an octave in 0.5 ms) and a zigzag of 31 segments × rises of 20 µs and 20 ms × 0 and +12 dB × drive 0–24 dB, rattling over the body |
-| dynamics | 105 | `softer` ladders of 0–36 dB from every reference |
+| dynamics | 126 | `softer` ladders of 0–36 dB from every reference |
 | seeds | 90 | six representative fixtures, one per family, across seeds 2–16 |
-| rates | 18 | 44.1, 88.2 and 96 kHz exports |
+| rates | 30 | 44.1, 88.2, 96, 176.4 and 192 kHz exports |
 | random | 300 | the whole valid domain: 220 drawn without rims or a brush, then 80 with up to two rims and, four times in five, a brush |
+| takes | 16 | takes that differ as played, at 3 dB and 5 ms, from `clap`, `crack`, `rimshot` and `brush` across four seeds |
 | longest | 3 | 2 s of body and 1 s of noise, at 96 kHz |
 
 ### Results
 
-| | 16×, 957 fixtures | 32×, 957 fixtures | 32×, 1,441 fixtures |
+| | 16×, 957 fixtures | 32×, 957 fixtures | 32×, 1,490 fixtures |
 |---|---|---|---|
-| Pass (E ≤ −100 dB) | 612 | 710 | 1,049 |
-| Converged references | 812 | 812 | 1,229 |
-| Inside the validated domain | 546 | 654 | 967 |
+| Pass (E ≤ −100 dB) | 612 | 710 | 1,092 |
+| Converged references | 812 | 812 | 1,276 |
+| Inside the validated domain | 546 | 654 | 1,010 |
 | Inside and failing or unconverged | **0** | **0** | **0** |
 | Worst error inside | −110.9 dB | −113.9 dB | −110.4 dB |
-| Undriven fixtures passing | 283 of 298 | 298 of 298 | 450 of 450 |
+| Undriven fixtures passing | 283 of 298 | 298 of 298 | 458 of 458 |
 | Kink bound exceeded | never | never | never |
 | Saturation constant for 6 dB of margin | 1.11 | 0.419 | 0.539 |
 | Outside but passing (the rule's caution) | 66 | 56 | 82 |
@@ -146,8 +148,8 @@ unconverged / worst error inside): body 113 / 118 / 25 / −125.2 dB; noise 51 /
 53 / 70 / −119.1; layers 4 / 4 / 7 / −154.7; rattle 76 / 89 / 0 / −120.3;
 clicks 39 / 55 / 5 / −113.9; bursts 33 / 51 / 0 / −144.1; snaps 27 / 27 / 0 /
 −144.5; rims 120 / 123 / 36 / −110.4; brushes 78 / 97 / 17 / −125.7;
-dynamics 105 / 105 / 0 / −143.4; seeds 90 / 90 / 0 / −131.7; rates 9 / 9 / 3
-/ −147.4; random 219 / 225 / 49 / −115.2; longest 3 / 3 / 0 / −148.0. The
+dynamics 126 / 126 / 0 / −143.4; seeds 90 / 90 / 0 / −131.7; rates 15 / 15 / 5
+/ −147.2; random 219 / 225 / 49 / −115.2; longest 3 / 3 / 0 / −148.0; takes 16 / 16 / 0 / −141.0. The
 random family draws each level as silence half the time; a draw that would
 silence every source sounds its first layer instead, so every random fixture
 sounds.
@@ -185,7 +187,7 @@ With rims it needs **0.539**: the worst fixture is a rim with modes at 19 and
 inside the limit, but which the saturation term must still cover twice over.
 **C = 0.54 is frozen**, as the plan's procedure requires. The domain barely
 depends on C: near its edge the prediction moves 11–12 dB per dB of drive, so
-0.5 and 0.54 admit the same 967 fixtures, C = 2 would admit 956, and none
+0.5 and 0.54 admit the same 1,010 fixtures, C = 2 would admit 999, and none
 fails at any of them.
 
 ### The kink bound
@@ -218,19 +220,19 @@ brute force renders every candidate the report considers, every 0.5 dB and
 both sides of every drop of the knee slew, from the fixture's own drive until
 the status changes, then bisects that bracket with full renders to 0.00001 dB.
 On fixtures whose edge is within 6 dB, it also scans every 0.05 dB up to the
-edge. In all, 1,441 fixtures and 142,540 full renders, with C = 0.54:
+edge. In all, 1,490 fixtures and 146,464 full renders, with C = 0.54:
 
-- **Never optimistic.** On the 1,189 fixtures whose status changes within
+- **Never optimistic.** On the 1,227 fixtures whose status changes within
   0–48 dB, the report is at most 0.00001 dB beyond the brute force, its
-  resolution. It is exact to 0.001 dB on 909, conservative by 0.001–0.1 dB on
-  236, by 0.1–1 dB on 36 and by 1–2.2 dB on 8.
-- **Exact where it matters.** Within 3 dB of the edge (145 fixtures) it is at
+  resolution. It is exact to 0.001 dB on 928, conservative by 0.001–0.1 dB on
+  253, by 0.1–1 dB on 36 and by 1–2.2 dB on 8.
+- **Exact where it matters.** Within 3 dB of the edge (146 fixtures) it is at
   most 0.147 dB conservative.
 - **No change of status left.** Where full renders never change status within
-  0–48 dB (252 fixtures), the report says so on 251. On the other it places an
+  0–48 dB (263 fixtures), the report says so on 262. On the other it places an
   edge at 47.8 dB where the status stays inside: cautious, never a claimed
   way back in that is not there.
-- **No islands missed.** The 267 dense scans found no change of status
+- **No islands missed.** The 269 dense scans found no change of status
   between the candidates.
 
 The larger gaps come from an output peak that moves to a position no probe
@@ -262,6 +264,9 @@ reference peaks below −1 dBFS.
 | rimshot | −27.0 | 0.23 dB | −6.35 dBFS | yes | 19.5 dB | 24.2 dB |
 | cross-stick | −27.0 | 0.03 dB | −6.03 dBFS | yes | 31.8 dB | 29.3 dB |
 | brush | −27.0 | 0.33 dB | −12.75 dBFS | yes | 95.3 dB | 26.5 dB |
+| zap | −27.0 | 0.00 dB | −13.66 dBFS | yes | 29.5 dB | 31.2 dB |
+| reverse | −27.0 | 0.26 dB | −13.35 dBFS | yes | 106.0 dB | 19.0 dB |
+| closing | −27.0 | 0.23 dB | −9.49 dBFS | yes | 33.4 dB | 18.1 dB |
 
 The loudness range across the references is 0.08 dB. Every take spread is
 within 1 dB, so none needs level matching. The nine references of revision 5
@@ -376,7 +381,7 @@ matches best, piece by piece, and measures its gain against that file below
 | liquidsfz 0.4.1 | 24 of 24, the round robins in order | 0.9975 | −7.22 dB | 0.0001 dB |
 
 So both play every velocity on its layer, cycle the takes in sequence, and
-apply the group's volume and amplitude curve exactly: velocity follows the
+apply the group's amplitude curve exactly: velocity follows the
 square law across the layers' boundaries, up to each player's own overall
 gain. What the players do differently, measured:
 
