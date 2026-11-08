@@ -51,7 +51,9 @@ def pchip_slopes(times: ArrayLike, values: ArrayLike) -> Floats:
     ml, mr, hl, hr = m[:-1], m[1:], h[:-1], h[1:]
     agree = (np.sign(ml) == np.sign(mr)) & (ml != 0) & (mr != 0)
     w1, w2 = 2 * hr + hl, hr + 2 * hl
-    with np.errstate(divide="ignore", invalid="ignore"):
+    # Where a secant is 0 the mean is not used; where one is subnormal its reciprocal overflows to ∞ and the mean,
+    # at most three times the smaller secant, comes out 0, within rounding of its exact value.
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         mean = (w1 + w2) / (w1 / ml + w2 / mr)
     d = np.empty(t.size)
     d[1:-1] = np.where(agree, mean, 0.0)

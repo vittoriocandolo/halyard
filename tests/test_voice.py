@@ -149,7 +149,8 @@ def x_internal(p: Patch, rate: int, n0: int, n1: int) -> Floats:
 def test_drive_identities() -> None:
     """Find 0 dB the identity, S(±1) = ±1 exactly, S odd and monotone, and the small-signal gain the drive."""
     assert voice.drive_alpha(0.0) == 0.0
-    for db in (0.5, 6.0, 18.0, 48.0):
+    assert voice.drive_alpha(5e-324) == voice.drive_alpha(1e-300) == 0.0  # a gain that rounds to 1 is a bypass
+    for db in (1e-12, 0.5, 6.0, 18.0, 48.0):
         a = voice.drive_alpha(db)
         assert a / math.tanh(a) == pytest.approx(10 ** (db / 20), rel=1e-14)
         x = np.linspace(-3, 3, 10001)

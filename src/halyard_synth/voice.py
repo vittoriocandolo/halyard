@@ -54,9 +54,9 @@ STEPS = 3  # a brush's tables per octave of its sweep
 
 def drive_alpha(db: float) -> float:
     """Return α with α / tanh α = 10^(db/20): the saturator's small-signal gain. 0 dB is bypass."""
-    if db == 0.0:
-        return 0.0
     g = 10.0 ** (db / 20.0)
+    if g == 1.0:  # 0 dB, or so little that the gain rounds to 1: α would be under 10⁻⁷, a bypass within rounding
+        return 0.0
     # x / tanh x lies between x and x + 1, so [g − 1, g] brackets the root.
     root: float = brentq(
         lambda a: a / math.tanh(a) - g,

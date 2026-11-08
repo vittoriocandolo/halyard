@@ -378,3 +378,11 @@ def test_compression_needs_a_flat_peak() -> None:
     bent = Curve([0.0, 0.001, 0.01], [0.0, 1.0, 0.0], [0.0, 5.0, 0.0])
     with pytest.raises(ValueError, match="zero slope at the peak"):
         compressed(bent, 2.0)
+
+
+@pytest.mark.parametrize("gain", [5e-324, 1e-320, 2.2250738585072014e-308])
+def test_a_subnormal_knot_has_a_slope_within_rounding_of_zero(gain: float) -> None:
+    """Find the slope at a knot a subnormal gain away from its neighbours' 0, where a reciprocal overflows."""
+    d = pchip_slopes([0.0, 1.0, 2.0, 3.0], [0.0, gain, 2 * gain, 0.0])
+    assert np.all(np.isfinite(d))
+    assert np.all(np.abs(d) <= 3 * 2 * gain)  # the shape-preserving rules: at most three times the steepest secant
