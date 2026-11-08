@@ -63,3 +63,10 @@ The first public release.
   matched in loudness, in a blind order revealed at the end.
 - `halyard pack`: velocity layers on a square law with takes as round robins,
   mapped by an SFZ file.
+- Input that cannot be misread: a pack whose name a sampler would read as
+  part of its SFZ map is refused; `halyard extract` never prints control
+  characters, which a terminal would act on; WAVs, embedded chunks and patches
+  are read with every size checked, so a damaged or crafted file is refused
+  with its reason; beds and samples holding values that are not numbers are
+  refused before they reach the device. Releases are published with
+  attestations of where they were built.
