@@ -11,13 +11,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  pypi:
-    name: publish to PyPI
+  # Tests and the build run every locked dependency's code, so they never hold the publishing token.
+  build:
+    name: test and build
     runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       contents: read # to check out the repository
-      id-token: write # to publish to PyPI by trusted publishing
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,4 +34,23 @@ jobs:
           fi
       - run: uv run --locked pytest
       - run: uv build
-      - run: uv publish --trusted-publishing always
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  # Publishing runs no project code: it uploads what the build made, with attestations of where it was built.
+  pypi:
+    name: publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # to publish to PyPI by trusted publishing, and to sign its attestations
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3

@@ -102,6 +102,10 @@ The release workflow then checks that the tag matches the version, runs the
 tests, builds the package and publishes it to PyPI as `halyard-synth`, through
 PyPI's trusted publishing: configure this repository and its `pypi`
 environment as a trusted publisher on PyPI once, and no token is needed. The
+tests and the build run in a job that never holds the publishing token; a
+second job, which runs no project code, uploads what the first built, with
+attestations of where it was built. Give the `pypi` environment required
+reviewers, so that a pushed tag publishes only once someone approves it. The
 package is `halyard_synth`; the command is `halyard`.
 
 ## Commits and pull requests
