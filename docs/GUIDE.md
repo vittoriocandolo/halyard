@@ -383,18 +383,15 @@ N takes (take j of a layer plays its seed + j − 1).
 - Files are named `<stem>_v<top velocity>_rr<take>.wav`, so they also map by
   hand in samplers without SFZ.
 - `<stem>.sfz` maps them. Velocity follows a square law, 40·log₁₀(v/127) dB:
-  each layer sits where the law reaches its loudness relative to the loudest,
-  neighbours meet halfway in dB, and each layer's group carries a curve point
-  at every velocity in its range, so the level follows the law across layer
-  boundaries. Takes cycle in sequence; the drum never transposes, and it plays
+  a layer's velocities run up to its own, where the law reaches its loudness
+  relative to the loudest, and its group carries a curve point at every
+  velocity below it, so the level follows the law across layer boundaries and
+  no velocity plays a take louder than it was rendered. Takes cycle in sequence; the drum never transposes, and it plays
   out as a one-shot whatever the note's length, so a short note never cuts it. The key
   defaults to 38, the General MIDI snare, or 39, the hand clap, when no layer
   has a body.
 - The pack report lists each layer's loudness, velocity range, take spread and
   domain status.
-
-Neighbouring layers more than 12 dB apart need a group volume above +6 dB,
-which some players cap; the pack report says so.
 
 ## In a DAW
 

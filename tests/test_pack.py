@@ -28,7 +28,6 @@ LAW_DB = 0.01  # the level follows the square law within this, measured from the
 STEP_DB = 0.02  # and never steps more than one velocity's step past it across a boundary
 PEAK_DB = 1e-6  # in peak mode the loudest file is at its target
 MATCHED_DB = 0.01  # level matching brings a layer's takes within this
-LOUD_DB = 6.0  # some players stop a group's volume here
 
 
 def parse_sfz(text: str) -> list[tuple[str, Opcodes]]:
@@ -82,23 +81,24 @@ def test_velocity_ranges_follow_the_square_law() -> None:
     assert ranges[-1][0] == 1
     for (lo, _), (_, hi) in itertools.pairwise(ranges):
         assert hi == lo - 1  # contiguous, no gaps and no overlaps
-    # A layer 6 dB down sits where 40·log10(v/127) = −6: v ≈ 90; neighbours meet halfway in dB.
-    natural = 127 * 10 ** (-6 / 40)
-    assert ranges[1][0] <= natural <= ranges[1][1]
-    assert ranges[0][0] == math.floor(math.sqrt(127 * natural)) + 1
-    with pytest.raises(pack.PackError, match="too close in loudness"):
+    # A layer 6 dB down runs up to where 40·log10(v/127) = −6, v = 89.9: never above its own loudness.
+    assert ranges[1][1] == math.floor(127 * 10 ** (-6 / 40))
+    assert ranges[0][0] == ranges[1][1] + 1
+    with pytest.raises(pack.PackError, match="layers 2 and 3 are within a velocity step"):
         pack.velocity_ranges([0.0, -0.001, -0.002])
+    with pytest.raises(pack.PackError, match=r"layer 2 is 90\.0 dB under the loudest"):
+        pack.velocity_ranges([0.0, -90.0])
 
 
 def test_the_curve_puts_each_layer_on_the_square_law() -> None:
-    """Find each velocity's volume and curve point putting the layer on 40·log₁₀(v/127)."""
+    """Find each velocity's curve point putting the layer on 40·log₁₀(v/127), never above its own level."""
     for relative in (0.0, -5.0, -17.5):
-        lo, hi = 40, 90
-        volume, curve = pack.curve_for(relative, lo, hi)
-        assert max(curve) == 1.0
+        hi = math.floor(127 * 10 ** (relative / 40))
+        curve = pack.curve_for(relative, 20, hi)
+        assert max(curve) <= 1.0
         assert min(curve) > 0
-        for v, c in zip(range(lo, hi + 1), curve, strict=True):
-            assert relative + volume + 20 * math.log10(c) == pytest.approx(40 * math.log10(v / 127), abs=1e-9)
+        for v, c in zip(range(20, hi + 1), curve, strict=True):
+            assert relative + 20 * math.log10(c) == pytest.approx(40 * math.log10(v / 127), abs=1e-9)
 
 
 def test_every_velocity_and_take_maps_to_exactly_one_file(built: pack.Pack, tmp_path: Path) -> None:
@@ -136,7 +136,7 @@ def test_the_level_follows_the_square_law_across_layer_boundaries(built: pack.Pa
         top = loud if top is None else top
         for v in range(int(group["lovel"]), int(group["hivel"]) + 1):
             c = float(group[f"amp_velcurve_{v}"])
-            levels.append((v, loud + float(group["volume"]) + 20 * math.log10(c) - top))
+            levels.append((v, loud + 20 * math.log10(c) - top))
     levels.sort()
     assert [v for v, _ in levels] == list(range(1, TOP + 1))
     for v, level in levels:
@@ -236,12 +236,12 @@ def test_the_command_writes_a_pack(ladder: list[Path], tmp_path: Path, capsys: p
     assert "not softer" in capsys.readouterr().err
 
 
-def test_a_loud_group_volume_is_flagged(ladder: list[Path]) -> None:
-    """Warn when a layer's group volume passes +6 dB, which some players do not reach."""
+def test_no_velocity_plays_a_take_louder_than_it_was_rendered(ladder: list[Path]) -> None:
+    """Find every curve at most 1 and no group volume, even for layers 18 dB apart: the map only lowers."""
     loud = loads(ladder[0].read_text(encoding="utf-8"))
     pk = pack.build([("loud", loud), ("far", softer(loud, 18))])
-    assert pk.layers[1].volume_db > LOUD_DB
-    assert any("its group volume is" in line for line in pk.lines("kit"))
+    assert all(max(layer.curve) <= 1.0 for layer in pk.layers)
+    assert "volume=" not in pk.sfz()
 
 
 def test_the_command_refuses_what_it_cannot_pack(

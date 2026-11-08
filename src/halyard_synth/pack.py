@@ -18,7 +18,6 @@ across layer boundaries.
 from __future__ import annotations
 
 import dataclasses
-import itertools
 import math
 import multiprocessing
 import os
@@ -46,7 +45,6 @@ if TYPE_CHECKING:
 
 SNARE_KEY, CLAP_KEY = 38, 39  # General MIDI: acoustic snare, hand clap
 TOP_KEY = 127  # the highest MIDI key
-LOUD_VOLUME_DB = 6.0  # the group volume some players stop at
 UNEVEN_DB = 1.0  # a take spread over this suggests level matching
 
 
@@ -76,7 +74,6 @@ class Layer:
     relative_db: float  # to the loudest layer
     lovel: int
     hivel: int
-    volume_db: float  # the group's volume, which with the curve places the layer on the square law
     curve: tuple[float, ...]  # amplitude at lovel … hivel, at most 1
     take_loudness: tuple[float, ...]
     take_gain_db: tuple[float, ...]
@@ -96,29 +93,33 @@ class Layer:
 def velocity_ranges(relative_db: list[float]) -> list[tuple[int, int]]:
     """Return (lovel, hivel) per layer, loudest first, from each layer's loudness relative to the loudest.
 
-    Layer i sits where 40·log₁₀(v/127) reaches its level; neighbours meet at the
-    geometric mean of their velocities, halfway in dB.
+    A layer's velocities run up to its own, the velocity where 40·log₁₀(v/127)
+    reaches its level, from just above the softer layer's own. So the map only
+    ever lowers a take, never plays it louder than it was rendered, and the
+    law holds at every velocity.
     """
-    natural = [127.0 * 10.0 ** (d / 40.0) for d in relative_db]
-    bounds = [127.0, *(math.sqrt(a * b) for a, b in itertools.pairwise(natural)), 0.0]
-    ranges = [(math.floor(bounds[i + 1]) + 1, math.floor(bounds[i])) for i in range(len(natural))]
+    own = [math.floor(127.0 * 10.0 ** (d / 40.0) + 1e-9) for d in relative_db]  # the law's inverse
+    lows = [*(hi + 1 for hi in own[1:]), 1]
+    ranges = list(zip(lows, own, strict=True))
     for i, (lo, hi) in enumerate(ranges):
         if lo > hi:
-            msg = f"layers {i} and {i + 1} are too close in loudness to get velocities of their own"
+            msg = (
+                f"layers {i + 1} and {i + 2} are within a velocity step of each other in loudness"
+                if i + 1 < len(ranges)
+                else f"layer {i + 1} is {-relative_db[i]:.1f} dB under the loudest, below the square law at velocity 1"
+            )
             raise PackError(msg)
     return ranges
 
 
-def curve_for(relative_db: float, lovel: int, hivel: int) -> tuple[float, tuple[float, ...]]:
-    """Return the group volume in dB and the amplitude curve over lovel … hivel that put a layer on the square law.
+def curve_for(relative_db: float, lovel: int, hivel: int) -> tuple[float, ...]:
+    """Return the amplitude over lovel … hivel that puts a layer on the square law, never above 1.
 
     At velocity v the level should be 40·log₁₀(v/127) dB, and the layer's own
-    level is relative_db, so its gain is (v/127)² / 10^(relative_db/20). The
-    curve is that gain over its largest value, which becomes the volume.
+    level is relative_db, so its gain is (v/127)² / 10^(relative_db/20): at most
+    1 up to the layer's own velocity, where its range ends.
     """
-    gains = [(v / 127.0) ** 2 / 10.0 ** (relative_db / 20.0) for v in range(lovel, hivel + 1)]
-    top = max(gains)
-    return 20.0 * math.log10(top), tuple(g / top for g in gains)
+    return tuple((v / 127.0) ** 2 / 10.0 ** (relative_db / 20.0) for v in range(lovel, hivel + 1))
 
 
 def _synthesize(p: Patch) -> tuple[Floats, float, Domain]:
@@ -179,10 +180,9 @@ class Pack:
                 f"lovel={layer.lovel}",
                 f"hivel={layer.hivel}",
                 f"seq_length={self.takes}",
-                f"volume={layer.volume_db:.4f}",
             ]
             lines += [
-                f"amp_velcurve_{v}={c:.6f}"
+                f"amp_velcurve_{v}={c:.9f}"  # nine decimals: velocity 1 within 1e-4 dB of the law
                 for v, c in zip(range(layer.lovel, layer.hivel + 1), layer.curve, strict=True)
             ]
             for j, name in enumerate(layer.files(self.stem), 1):
@@ -214,12 +214,6 @@ class Pack:
                 f"velocities {layer.lovel}–{layer.hivel}{spread}; {status}"
             )
             rows.append((f"layer {i}", levels))
-            if layer.volume_db > LOUD_VOLUME_DB:
-                loud = (
-                    f"its group volume is {layer.volume_db:+.1f} dB; some players stop at +6 dB, so "
-                    "keep neighbouring layers within 12 dB"
-                )
-                rows.append(("", loud))
         rows.append(("render", f"{self.render_s:.1f} s"))
         return [f"{label:<9}{text}" for label, text in rows]
 
@@ -311,7 +305,7 @@ def build(
     layers: list[Layer] = []
     audio: list[tuple[Audio, ...]] = []
     for i, ((name, p), (lo, hi)) in enumerate(zip(patches, ranges, strict=True)):
-        volume, curve = curve_for(relative[i], lo, hi)
+        curve = curve_for(relative[i], lo, hi)
         files = tuple(output_stage(o, set_gain * g, p.output.polarity) for o, g in zip(outs[i], gains[i], strict=True))
         audio.append(files)
         layers.append(
@@ -322,7 +316,6 @@ def build(
                 relative[i],
                 lo,
                 hi,
-                volume,
                 curve,
                 tuple(x + level + db(g) for x, g in zip(loud[i], gains[i], strict=True)),
                 tuple(db(g) for g in gains[i]),
