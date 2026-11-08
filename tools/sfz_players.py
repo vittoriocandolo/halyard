@@ -179,7 +179,7 @@ def read_sfz(path: Path) -> Mapping:
             else:
                 opcodes[-1][name] = value
     groups = [
-        Group(int(o["lovel"]), int(o["hivel"]), float(o["volume"]), c, r)
+        Group(int(o["lovel"]), int(o["hivel"]), float(o.get("volume", "0")), c, r)
         for o, c, r in zip(opcodes, curves, samples, strict=True)
     ]
     return Mapping(key, groups)
