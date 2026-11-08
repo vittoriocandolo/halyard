@@ -9,10 +9,16 @@ import tomllib
 from typing import Any
 
 import pytest
+from hypothesis import settings
 
 from halyard_synth.patch import Patch, from_dict
 
 # The illustrative patch from the plan (§4).
+# Fuzzing derives its examples the same way on every run and keeps none between runs, so a run is reproducible
+# from the code alone; a deadline would make the outcome depend on the machine.
+settings.register_profile("reproducible", derandomize=True, database=None, deadline=None)
+settings.load_profile("reproducible")
+
 EXAMPLE = """\
 instrument = "snare"
 schema = 1
