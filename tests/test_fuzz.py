@@ -144,23 +144,49 @@ VALUES: st.SearchStrategy[Json] = st.one_of(
 )
 
 
+EXTREMES = [0.0, -0.0, 5e-324, 1e-320, 2.2250738585072014e-308, 1e-300, 1e300, 1.7976931348623157e308]
+SCALES = [0.0, 0.5, 0.999, 1.001, 2.0, 4.0]
+
+
+def holder_of(data: dict[str, Any], path: tuple[str | int, ...]) -> tuple[Any, str | int]:
+    """Return the table or array that holds a path's value, and the value's key or index in it."""
+    *parents, last = path
+    holder: Any = data
+    for key in parents:
+        holder = holder[key]
+    return holder, last
+
+
+def numbers(data: dict[str, Any]) -> list[tuple[str | int, ...]]:
+    """Return the path of every number in a parsed patch."""
+    found = []
+    for path in leaves(data):
+        holder, last = holder_of(data, path)
+        if type(holder[last]) in {int, float}:
+            found.append(path)
+    return found
+
+
 @st.composite
-def edited_data(draw: st.DrawFn, *, near: bool = False) -> dict[str, Any]:
+def edited_data(draw: st.DrawFn, *, mode: str = "any") -> dict[str, Any]:
     """Return a shipped reference's data with a few values replaced by anything, or removed.
 
-    With `near`, numbers are only scaled, by up to four times or down to zero, so that most patches stay valid
-    and what they render is tried, at the edges of the domain included.
+    With mode "near", numbers are only scaled, by up to four times or down to zero, so that most patches stay
+    valid and what they render is tried, at the edges of the domain included. With "extreme", one number becomes
+    zero, a negative zero, a subnormal or one of the largest floats, which ranges let through and arithmetic
+    then overflows or underflows on.
     """
     data: dict[str, Any] = tomllib.loads(cli.reference_text(draw(st.sampled_from(cli.REFERENCES))))
+    if mode == "extreme":
+        holder, last = holder_of(data, draw(st.sampled_from(numbers(data))))
+        holder[last] = type(holder[last])(draw(st.sampled_from(EXTREMES)))
+        return data
     for _ in range(draw(st.integers(1, 3))):
-        *parents, last = draw(st.sampled_from(leaves(data)))
-        holder: Any = data
-        for key in parents:
-            holder = holder[key]
+        holder, last = holder_of(data, draw(st.sampled_from(leaves(data))))
         value = holder[last]
-        if near:
-            if isinstance(value, int | float) and not isinstance(value, bool):
-                holder[last] = type(value)(value * draw(st.sampled_from([0.0, 0.5, 0.999, 1.001, 2.0, 4.0])))
+        if mode == "near":
+            if type(value) in {int, float}:
+                holder[last] = type(value)(value * draw(st.sampled_from(SCALES)))
         elif draw(st.booleans()) or isinstance(holder, list):
             holder[last] = draw(VALUES)
         else:
@@ -186,8 +212,8 @@ def test_any_patch_text_is_a_patch_or_a_patch_error(text: str) -> None:
     accepted(p)
 
 
-@given(data=edited_data())
-@settings(max_examples=500)
+@given(data=st.one_of(edited_data(), edited_data(mode="extreme")))
+@settings(max_examples=800)
 def test_any_patch_data_is_a_patch_or_a_patch_error(data: dict[str, Any]) -> None:
     """Build a patch from edited data that writes back as itself, or refuse it with a patch error."""
     try:
@@ -199,8 +225,8 @@ def test_any_patch_data_is_a_patch_or_a_patch_error(data: dict[str, Any]) -> Non
     accepted(p)
 
 
-@given(data=edited_data(near=True))
-@settings(max_examples=40)
+@given(data=st.one_of(edited_data(mode="near"), edited_data(mode="extreme")))
+@settings(max_examples=60)
 def test_any_accepted_patch_renders(data: dict[str, Any]) -> None:
     """Render every patch the validation accepts into finite audio, as its report says."""
     try:
