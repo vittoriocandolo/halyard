@@ -24,7 +24,7 @@ import itertools
 import math
 import re
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -65,6 +65,29 @@ PAIR = 2  # a knot, a mode and a band are pairs
 LOWEST_HZ, HIGHEST_HZ = 10.0, 20000.0  # where a body frequency may go
 
 
+def _as(kind: str, keys: tuple[str, str] = ("", ""), note: str = "") -> dict[str, TomlField]:
+    """Describe how a field is written in TOML, as a dataclass field's metadata."""
+    return {"toml": TomlField(kind, keys, note)}
+
+
+@dataclass(frozen=True)
+class TomlField:
+    """How a section's field is read from TOML and written back: its kind, a pair's keys and its comment.
+
+    A number is a float, written exactly; an integer and a choice are written as
+    they are; a band is [low, high]; pairs are an array of two-key inline
+    tables. Ranges and the rules between fields belong to validation.
+    """
+
+    kind: str  # "number", "integer", "choice", "band" or "pairs"
+    keys: tuple[str, str]  # a pairs field's two keys, in order
+    note: str  # the canonical text's comment
+
+
+NUMBER = _as("number")
+SHAPE = _as("pairs", ("ms", "gain"))
+
+
 class PatchError(ValueError):
     """An invalid patch or edit. `problems` lists every reason, each with its field path."""
 
@@ -78,69 +101,69 @@ class PatchError(ValueError):
 class Body:
     """The modal body: its tuning, level and damping, its modes, its pitch glide and its shape."""
 
-    tune_hz: float
-    level_db: float
-    damping: float
-    modes: Knots  # ((ratio, level_db), ...)
-    pitch: Knots  # ((ms, ratio), ...)
-    amp: Knots  # ((ms, gain), ...)
+    tune_hz: float = field(metadata=NUMBER)
+    level_db: float = field(metadata=NUMBER)
+    damping: float = field(metadata=_as("number", note="mode i decays ratio^damping times faster"))
+    modes: Knots = field(metadata=_as("pairs", ("ratio", "level_db"), "loudest mode exactly 0 dB"))
+    pitch: Knots = field(metadata=_as("pairs", ("ms", "ratio"), "ratio to tune_hz; starts at 0 ms, ends at 1"))
+    amp: Knots = field(metadata=_as("pairs", ("ms", "gain"), "shape: 0 at both ends, highest point exactly 1"))
 
 
 @dataclass(frozen=True)
 class Layer:
     """A noise layer: its level, its band, its rattle depth and its shape."""
 
-    level_db: float
-    band_hz: tuple[float, float]  # (low, high)
-    rattle: float
-    amp: Knots  # ((ms, gain), ...)
+    level_db: float = field(metadata=NUMBER)
+    band_hz: tuple[float, float] = field(metadata=_as("band"))  # (low, high)
+    rattle: float = field(metadata=_as("number", note="0 … 1, gated at the body's fundamental"))
+    amp: Knots = field(metadata=SHAPE)
 
 
 @dataclass(frozen=True)
 class Brush:
     """A brush on the head: a noise layer whose band moves during the hit, by its sweep."""
 
-    level_db: float
-    band_hz: tuple[float, float]  # the band at sweep ratio 1
-    rattle: float
-    sweep: Knots  # ((ms, ratio), ...): the band's edges times the ratio
-    amp: Knots  # ((ms, gain), ...)
+    level_db: float = field(metadata=NUMBER)
+    band_hz: tuple[float, float] = field(metadata=_as("band", note="at sweep ratio 1"))
+    rattle: float = field(metadata=_as("number", note="0 … 1, gated at the body's fundamental"))
+    sweep: Knots = field(metadata=_as("pairs", ("ms", "ratio"), "the band's edges times the ratio"))
+    amp: Knots = field(metadata=SHAPE)
 
 
 @dataclass(frozen=True)
 class Rim:
     """The rim struck with or instead of the head: the hoop's ring and the stick's knock, as modes in Hz."""
 
-    level_db: float
-    damping: float
-    modes: Knots  # ((hz, level_db), ...)
-    amp: Knots  # ((ms, gain), ...)
+    level_db: float = field(metadata=NUMBER)
+    damping: float = field(metadata=_as("number", note="mode i decays (hz_i / hz_1)^damping times faster"))
+    modes: Knots = field(metadata=_as("pairs", ("hz", "level_db"), "loudest mode exactly 0 dB"))
+    amp: Knots = field(metadata=SHAPE)
 
 
 @dataclass(frozen=True)
 class Drive:
     """The saturator's small-signal gain."""
 
-    db: float
+    db: float = field(metadata=_as("number", note="small-signal gain; 0 = bypass"))
 
 
 @dataclass(frozen=True)
 class Output:
     """How the file is written: its rate, format, level mode and dB, and polarity."""
 
-    sample_rate: int
-    format: str
-    mode: str
-    db: float
-    polarity: int
+    sample_rate: int = field(metadata=_as("integer"))
+    format: str = field(metadata=_as("choice", note='"float32" | "pcm24" | "pcm16"'))
+    mode: str = field(metadata=_as("choice", note='"gain" | "peak" | "true-peak"'))
+    db: float = field(metadata=_as("number", note="gain in dB, or peak target in dBFS"))
+    polarity: int = field(metadata=_as("integer"))
 
 
 @dataclass(frozen=True)
 class Takes:
     """How a patch's takes differ as played: in strength, and in the timing of every rise after the first."""
 
-    strength_db: float  # each take struck up to this much harder or softer, by softer's rules
-    timing_ms: float  # each later rise of a layer, rim or brush moved up to this much earlier or later
+    strength_db: float = field(metadata=_as("number", note="each take this much harder or softer, at most"))
+    timing_ms: float = field(metadata=_as("number", note="each later rise this much earlier or later, at most"))
 
 
 @dataclass(frozen=True)
@@ -512,15 +535,7 @@ def _validate_output(o: object, problems: _Problems) -> None:
 
 # Parsing.
 
-_FIELDS = {
-    "": ("instrument", "schema", "seed", "body", "noise", "drive", "output"),
-    "body": ("tune_hz", "level_db", "damping", "modes", "pitch", "amp"),
-    "noise": ("level_db", "band_hz", "rattle", "amp"),
-    "rim": ("level_db", "damping", "modes", "amp"),
-    "takes": ("strength_db", "timing_ms"),
-    "drive": ("db",),
-    "output": ("sample_rate", "format", "mode", "db", "polarity"),
-}  # a [[brush]] has a layer's fields and its sweep
+_TOP = ("instrument", "schema", "seed", "body", "noise", "drive", "output")
 _OPTIONAL = ("rim", "brush", "takes")  # what may be absent: no rims, no brush, takes that differ only in noise
 
 
@@ -569,30 +584,51 @@ def _section(problems: _Problems, path: str, table: object, fields: Sequence[str
     return table if _keys(problems, f"{path}.", table, fields) else None
 
 
-def _body(problems: _Problems, table: object) -> Body | None:
-    """Build the body; None after reporting what is wrong."""
-    t = _section(problems, "body", table, _FIELDS["body"])
+def _read[S: (Body, Layer, Rim, Brush, Drive, Output, Takes)](
+    problems: _Problems,
+    path: str,
+    table: object,
+    section: type[S],
+) -> S | None:
+    """Build a section from its TOML table, by its fields; None after reporting what is wrong.
+
+    Numbers become floats, a band a pair and pairs a tuple of pairs; whatever
+    a value holds, the section's validation names what is wrong with it.
+    """
+    fields = dataclasses.fields(section)
+    t = _section(problems, path, table, [f.name for f in fields])
     if t is None:
         return None
-    modes = _pairs(problems, "body.modes", t["modes"], ("ratio", "level_db"))
-    pitch = _pairs(problems, "body.pitch", t["pitch"], ("ms", "ratio"))
-    amp = _pairs(problems, "body.amp", t["amp"], ("ms", "gain"))
-    if modes is None or pitch is None or amp is None:
+    values: dict[str, Any] = {}
+    for f in fields:
+        spec: TomlField = f.metadata["toml"]
+        v = t[f.name]
+        if spec.kind == "number":
+            values[f.name] = _float(v)
+        elif spec.kind == "band":
+            values[f.name] = tuple(map(_float, v)) if isinstance(v, list) else v
+        elif spec.kind == "pairs":
+            values[f.name] = _pairs(problems, f"{path}.{f.name}", v, spec.keys)
+        else:
+            values[f.name] = v
+    if any(values[f.name] is None for f in fields if f.metadata["toml"].kind == "pairs"):
         return None
-    return Body(_float(t["tune_hz"]), _float(t["level_db"]), _float(t["damping"]), modes, pitch, amp)
+    return section(**values)
 
 
 def _layer(problems: _Problems, path: str, table: dict[str, Any]) -> Layer | None:
-    """Build a layer, or the layer a brush sweeps; None after reporting what is wrong."""
-    t = _section(problems, path, table, _FIELDS["noise"])
-    if t is None:
-        return None
-    amp = _pairs(problems, f"{path}.amp", t["amp"], ("ms", "gain"))
-    if amp is None:
-        return None
-    band = tuple(map(_float, t["band_hz"])) if isinstance(t["band_hz"], list) else t["band_hz"]
-    # Whatever the band holds, the layer's validation names what is wrong with it.
-    return Layer(_float(t["level_db"]), cast("tuple[float, float]", band), _float(t["rattle"]), amp)
+    """Build a noise layer."""
+    return _read(problems, path, table, Layer)
+
+
+def _rim(problems: _Problems, path: str, table: dict[str, Any]) -> Rim | None:
+    """Build a rim."""
+    return _read(problems, path, table, Rim)
+
+
+def _brush(problems: _Problems, path: str, table: dict[str, Any]) -> Brush | None:
+    """Build a brush."""
+    return _read(problems, path, table, Brush)
 
 
 def _header(data: dict[str, Any]) -> None:
@@ -630,44 +666,18 @@ def _tables_of[T](
     return found if len(found) == len(built) else None
 
 
-def _rim(problems: _Problems, path: str, table: dict[str, Any]) -> Rim | None:
-    """Build a rim; None after reporting what is wrong."""
-    t = _section(problems, path, table, _FIELDS["rim"])
-    if t is None:
-        return None
-    modes = _pairs(problems, f"{path}.modes", t["modes"], ("hz", "level_db"))
-    amp = _pairs(problems, f"{path}.amp", t["amp"], ("ms", "gain"))
-    if modes is None or amp is None:
-        return None
-    return Rim(_float(t["level_db"]), _float(t["damping"]), modes, amp)
-
-
-def _brush(problems: _Problems, path: str, table: dict[str, Any]) -> Brush | None:
-    """Build a brush: a layer's fields and a sweep; None after reporting what is wrong."""
-    layer = _layer(problems, path, {k: v for k, v in table.items() if k != "sweep"})
-    if "sweep" not in table:
-        problems.add(f"{path}.sweep", "missing")
-        return None
-    sweep = _pairs(problems, f"{path}.sweep", table["sweep"], ("ms", "ratio"))
-    if layer is None or sweep is None:
-        return None
-    return Brush(layer.level_db, layer.band_hz, layer.rattle, sweep, layer.amp)
-
-
 def _drive(problems: _Problems, data: dict[str, Any]) -> Drive | None:
     """Build and check the drive; None after reporting what is wrong."""
-    if "drive" not in data or (t := _section(problems, "drive", data["drive"], _FIELDS["drive"])) is None:
+    if "drive" not in data or (drive := _read(problems, "drive", data["drive"], Drive)) is None:
         return None
-    drive = Drive(_float(t["db"]))
     _validate_drive(drive, problems)
     return drive
 
 
 def _output(problems: _Problems, data: dict[str, Any]) -> Output | None:
     """Build and check the output section; None after reporting what is wrong."""
-    if "output" not in data or (t := _section(problems, "output", data["output"], _FIELDS["output"])) is None:
+    if "output" not in data or (output := _read(problems, "output", data["output"], Output)) is None:
         return None
-    output = Output(t["sample_rate"], t["format"], t["mode"], _float(t["db"]), t["polarity"])
     _validate_output(output, problems)
     return output
 
@@ -678,10 +688,10 @@ def from_dict(data: object) -> Patch:
         raise PatchError(["expected a table"])
     _header(data)
     problems = _Problems()
-    _keys(problems, "", {k: v for k, v in data.items() if k not in _OPTIONAL}, _FIELDS[""])
+    _keys(problems, "", {k: v for k, v in data.items() if k not in _OPTIONAL}, _TOP)
     if "seed" in data:
         _validate_seed(data["seed"], problems)
-    body = _body(problems, data["body"]) if "body" in data else None
+    body = _read(problems, "body", data["body"], Body) if "body" in data else None
     if body is not None:
         _validate_body(body, problems)
     noise = _tables_of(problems, data, "noise", _layer) if "noise" in data else None
@@ -693,9 +703,8 @@ def from_dict(data: object) -> Patch:
     if brush is not None:
         _validate_brushes(brush, problems)
     drive, output = _drive(problems, data), _output(problems, data)
-    takes = None
-    if "takes" in data and (t := _section(problems, "takes", data["takes"], _FIELDS["takes"])) is not None:
-        takes = Takes(_float(t["strength_db"]), _float(t["timing_ms"]))
+    takes = _read(problems, "takes", data["takes"], Takes) if "takes" in data else None
+    if takes is not None:
         problems.number("takes.strength_db", takes.strength_db, 0.0, MAX_TAKE_DB)
         problems.number("takes.timing_ms", takes.timing_ms, 0.0, MAX_TAKE_MS)
     # Anything missing or unbuilt has been reported, so with no problem every part is there and checked.
@@ -730,70 +739,34 @@ def load(path: str | os.PathLike[str]) -> Patch:
     return loads(text)
 
 
+def _table(section: Body | Layer | Rim | Brush | Drive | Output | Takes) -> dict[str, Any]:
+    """Return a section as the table its TOML parses to."""
+    out: dict[str, Any] = {}
+    for f in dataclasses.fields(section):
+        spec: TomlField = f.metadata["toml"]
+        v = getattr(section, f.name)
+        if spec.kind == "band":
+            out[f.name] = list(v)
+        elif spec.kind == "pairs":
+            out[f.name] = [{spec.keys[0]: a, spec.keys[1]: b} for a, b in v]
+        else:
+            out[f.name] = v
+    return out
+
+
 def to_dict(p: Patch) -> dict[str, Any]:
     """Return the patch as the table its TOML parses to."""
-    b = p.body
     return {
         "instrument": INSTRUMENT,
         "schema": SCHEMA,
         "seed": p.seed,
-        "body": {
-            "tune_hz": b.tune_hz,
-            "level_db": b.level_db,
-            "damping": b.damping,
-            "modes": [{"ratio": r, "level_db": v} for r, v in b.modes],
-            "pitch": [{"ms": m, "ratio": r} for m, r in b.pitch],
-            "amp": [{"ms": m, "gain": g} for m, g in b.amp],
-        },
-        "noise": [
-            {
-                "level_db": n.level_db,
-                "band_hz": list(n.band_hz),
-                "rattle": n.rattle,
-                "amp": [{"ms": m, "gain": g} for m, g in n.amp],
-            }
-            for n in p.noise
-        ],
-        **(
-            {
-                "rim": [
-                    {
-                        "level_db": r.level_db,
-                        "damping": r.damping,
-                        "modes": [{"hz": hz, "level_db": v} for hz, v in r.modes],
-                        "amp": [{"ms": m, "gain": g} for m, g in r.amp],
-                    }
-                    for r in p.rim
-                ],
-            }
-            if p.rim
-            else {}
-        ),
-        **(
-            {
-                "brush": [
-                    {
-                        "level_db": b.level_db,
-                        "band_hz": list(b.band_hz),
-                        "rattle": b.rattle,
-                        "sweep": [{"ms": m, "ratio": r} for m, r in b.sweep],
-                        "amp": [{"ms": m, "gain": g} for m, g in b.amp],
-                    }
-                    for b in p.brush
-                ],
-            }
-            if p.brush
-            else {}
-        ),
-        "drive": {"db": p.drive.db},
-        "output": {
-            "sample_rate": p.output.sample_rate,
-            "format": p.output.format,
-            "mode": p.output.mode,
-            "db": p.output.db,
-            "polarity": p.output.polarity,
-        },
-        **({"takes": {"strength_db": p.takes.strength_db, "timing_ms": p.takes.timing_ms}} if p.takes else {}),
+        "body": _table(p.body),
+        "noise": [_table(n) for n in p.noise],
+        **({"rim": [_table(r) for r in p.rim]} if p.rim else {}),
+        **({"brush": [_table(b) for b in p.brush]} if p.brush else {}),
+        "drive": _table(p.drive),
+        "output": _table(p.output),
+        **({"takes": _table(p.takes)} if p.takes else {}),
     }
 
 
@@ -804,81 +777,45 @@ _COMMENT_COLUMN = 28
 
 def dumps(p: Patch) -> str:
     """Write the complete patch as TOML with the canonical comments; loads(dumps(p)) == p exactly."""
-    b, o = p.body, p.output
-    lines = [f'instrument = "{INSTRUMENT}"', f"schema = {SCHEMA}", f"seed = {p.seed}", "", "[body]"]
-    lines += _rows(
-        [
-            ("tune_hz", _f(b.tune_hz), ""),
-            ("level_db", _f(b.level_db), ""),
-            ("damping", _f(b.damping), "mode i decays ratio^damping times faster"),
-        ],
-    )
-    lines += _array("modes", [(("ratio", r), ("level_db", v)) for r, v in b.modes], "loudest mode exactly 0 dB")
-    lines += _array(
-        "pitch",
-        [(("ms", m), ("ratio", r)) for m, r in b.pitch],
-        "ratio to tune_hz; starts at 0 ms, ends at 1",
-    )
-    lines += _array(
-        "amp",
-        [(("ms", m), ("gain", g)) for m, g in b.amp],
-        "shape: 0 at both ends, highest point exactly 1",
-    )
+    lines = [f'instrument = "{INSTRUMENT}"', f"schema = {SCHEMA}", f"seed = {p.seed}", "", "[body]", *_text(p.body)]
     for j, n in enumerate(p.noise, 1):
-        lines += ["", _note("[[noise]]", f"noise[{j}]")]
-        lines += _rows(
-            [
-                ("level_db", _f(n.level_db), ""),
-                ("band_hz", f"[{_f(n.band_hz[0])}, {_f(n.band_hz[1])}]", ""),
-                ("rattle", _f(n.rattle), "0 … 1, gated at the body's fundamental"),
-            ],
-        )
-        lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in n.amp], "")
+        lines += ["", _note("[[noise]]", f"noise[{j}]"), *_text(n)]
     for j, r in enumerate(p.rim, 1):
-        lines += ["", _note("[[rim]]", f"rim[{j}]: the hoop's ring and the stick's knock")]
-        lines += _rows(
-            [
-                ("level_db", _f(r.level_db), ""),
-                ("damping", _f(r.damping), "mode i decays (hz_i / hz_1)^damping times faster"),
-            ],
-        )
-        lines += _array("modes", [(("hz", hz), ("level_db", v)) for hz, v in r.modes], "loudest mode exactly 0 dB")
-        lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in r.amp], "")
-    for j, brush in enumerate(p.brush, 1):
-        lines += ["", _note("[[brush]]", f"brush[{j}]: a noise layer whose band moves")]
-        lines += _rows(
-            [
-                ("level_db", _f(brush.level_db), ""),
-                ("band_hz", f"[{_f(brush.band_hz[0])}, {_f(brush.band_hz[1])}]", "at sweep ratio 1"),
-                ("rattle", _f(brush.rattle), "0 … 1, gated at the body's fundamental"),
-            ],
-        )
-        lines += _array(
-            "sweep",
-            [(("ms", m), ("ratio", r)) for m, r in brush.sweep],
-            "the band's edges times the ratio",
-        )
-        lines += _array("amp", [(("ms", m), ("gain", g)) for m, g in brush.amp], "")
-    lines += ["", "[drive]", *_rows([("db", _f(p.drive.db), "small-signal gain; 0 = bypass")])]
-    lines += ["", "[output]"]
-    lines += _rows(
-        [
-            ("sample_rate", str(o.sample_rate), ""),
-            ("format", f'"{o.format}"', '"float32" | "pcm24" | "pcm16"'),
-            ("mode", f'"{o.mode}"', '"gain" | "peak" | "true-peak"'),
-            ("db", _f(o.db), "gain in dB, or peak target in dBFS"),
-            ("polarity", str(o.polarity), ""),
-        ],
-    )
+        lines += ["", _note("[[rim]]", f"rim[{j}]: the hoop's ring and the stick's knock"), *_text(r)]
+    for j, b in enumerate(p.brush, 1):
+        lines += ["", _note("[[brush]]", f"brush[{j}]: a noise layer whose band moves"), *_text(b)]
+    lines += ["", "[drive]", *_text(p.drive), "", "[output]", *_text(p.output)]
     if p.takes is not None:
-        lines += ["", _note("[takes]", "how takes differ as played")]
-        lines += _rows(
-            [
-                ("strength_db", _f(p.takes.strength_db), "each take this much harder or softer, at most"),
-                ("timing_ms", _f(p.takes.timing_ms), "each later rise this much earlier or later, at most"),
-            ],
-        )
+        lines += ["", _note("[takes]", "how takes differ as played"), *_text(p.takes)]
     return "\n".join(lines) + "\n"
+
+
+def _text(section: Body | Layer | Rim | Brush | Drive | Output | Takes) -> list[str]:
+    """Write a section's fields: each run of single values as aligned rows, each array of pairs on its own."""
+    lines: list[str] = []
+    rows: list[tuple[str, str, str]] = []
+    for f in dataclasses.fields(section):
+        spec: TomlField = f.metadata["toml"]
+        v = getattr(section, f.name)
+        if spec.kind == "pairs":
+            lines += _rows(rows) if rows else []
+            rows = []
+            lines += _array(f.name, [((spec.keys[0], a), (spec.keys[1], b)) for a, b in v], spec.note)
+        else:
+            rows.append((f.name, _value(spec.kind, v), spec.note))
+    return lines + (_rows(rows) if rows else [])
+
+
+def _value(kind: str, v: object) -> str:
+    """Write a single value as TOML, by its field's kind: a number exactly, a choice quoted, a band as [low, high]."""
+    if kind == "number":
+        return _f(cast("float", v))
+    if kind == "choice":
+        return f'"{v}"'
+    if kind == "band":
+        low, high = cast("tuple[float, float]", v)
+        return f"[{_f(low)}, {_f(high)}]"
+    return str(v)
 
 
 def _f(x: float) -> str:
