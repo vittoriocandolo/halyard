@@ -46,6 +46,12 @@ supports, and the tests again with the oldest supported NumPy and SciPy.
   renders (`uv run python -m tools.golden`). Across platforms and library
   versions, samples may differ by rounding, which is no change: the golden
   renders allow a millionth of full scale.
+- **Edits print the same patch in every version.** A patch an editing command
+  printed is kept and rendered later, and a take is drawn anew at every
+  render, so `tests/test_edits.py` pins the canonical text each writes by its
+  SHA-256. Their numbers are rounded decimals, the same on every platform,
+  unlike a render's samples. A change needs a reason, a changelog entry, a new
+  version and new pins.
 - **Patches have no defaults.** A new field means a new schema version, and
   older schemas keep rendering exactly as before.
 - **Seeds and names are forever.** The keys that seed the noise and the
