@@ -11,6 +11,7 @@ fails here until it is made deliberately, as a new version (CONTRIBUTING.md).
 import dataclasses
 import functools
 import hashlib
+import math
 from collections.abc import Callable
 
 import pytest
@@ -31,6 +32,12 @@ def takes_of(name: str, strength_db: float, timing_ms: float, seed: int) -> Patc
     return patch.played(dataclasses.replace(ref(name), seed=seed, takes=patch.Takes(strength_db, timing_ms)))
 
 
+def two_rims() -> Patch:
+    """Return a rimshot with a rim click stacked on it: two rims, the second silent."""
+    two = patch.stack(ref("rimshot"), ref("rim-click"))
+    return dataclasses.replace(two, rim=(two.rim[0], dataclasses.replace(two.rim[1], level_db=-math.inf)))
+
+
 EDITS: dict[str, Callable[[], Patch]] = {
     "roll-build": lambda: patch.roll(patch.loads(EXAMPLE), patch.Roll(3, 60.0, 0.8, 6.0)),
     "roll-rimshot": lambda: patch.roll(ref("rimshot"), patch.Roll(2, 40.0), glide=1.0, contact=0.3),
@@ -39,6 +46,12 @@ EDITS: dict[str, Callable[[], Patch]] = {
     "flam-brush": lambda: patch.flam(ref("brush"), 30.0),
     "bursts": lambda: patch.bursts(ref("clap"), "noise[1]", patch.Train(4, 11.0, 2.0, 1.2, 0.2, 0.15, 0.9, 60.0)),
     "stack": lambda: patch.stack(ref("crack"), ref("short-clap"), 3.0),
+    "stack-rim": lambda: patch.stack(ref("brush"), ref("rim-click"), 3.0),
+    "stack-brush": lambda: patch.stack(ref("rim-click"), ref("brush"), -2.0),
+    "strokes-two-rims": lambda: patch.strokes(two_rims(), [(0.0, 0.0), (20.0, 4.0)]),
+    "strokes-in-glide": lambda: patch.strokes(ref("zap"), [(0.0, 0.0), (10.0, 3.0), (20.0, 0.0)]),
+    "stretch-rim": lambda: patch.stretch(ref("rimshot"), "rim[1].amp", 3.0),
+    "bursts-swell": lambda: patch.bursts(ref("clap"), "noise[1]", patch.Train(3, 15.0, taper=1.3, tail=0.4)),
     "softer": lambda: patch.softer(ref("rimshot"), 12.0),
     "tune": lambda: patch.tune(ref("crack"), "D3"),
     "stretch": lambda: patch.stretch(ref("long-snare"), "all", 1.5),
@@ -53,6 +66,12 @@ PINNED = {
     "flam-brush": "88904ef5db9bb94675a5f6fbca8c4c573e6f91832f6716f00f878c25a29f7ae1",
     "bursts": "3de62ef54cd840264bbbc5ca0be239c19f18d8c92d71127fa174e51dc72d2198",
     "stack": "f4c9bfd09e0ac30cd650153be8cafe05ba5f2fc7e629e79c70fc581929292bff",
+    "stack-rim": "575068fc237621dc961c7c99e4e8b7d91de2a3e5ca0b1497d6cbdacbcc31cc22",
+    "stack-brush": "1a445db1fb450034d5f75e212c4029a238315aedf271ae659f93058335412600",
+    "strokes-two-rims": "5d49c3202e541d9712d414f3d4a850bbe4a691de1a28353e9b7c2202a761c5d3",
+    "strokes-in-glide": "7117292294b26945f27ac6855feb896d2e6bddf2672e119a7e210b91d4aa18c7",
+    "stretch-rim": "71847ba6cef31f958c7898415af82bb89a0c876d8e1d61e3f021980248433e8a",
+    "bursts-swell": "826b8e748c90c3ddbcea1d35c39cbbda7bc82d4e406d248f2defeb63c5e130be",
     "softer": "482e84e1e2c1bfb49aa03b257ec2856b0f9d05659b764952410156117953c489",
     "tune": "df064056a6142b8a10130e4b6261255d0bf05ae454bc4b3cc271fdc8aef8587a",
     "stretch": "1ffffd1da6e6fc4f9d253b871ac9613a0c0c1b14d03614be9784592cad510ba7",
@@ -110,3 +129,59 @@ def test_a_stroke_starts_at_least_10_us_after_the_last_struck() -> None:
     message = "stroke 2: starts 0.05 ms after stroke 1, which strikes 0.05 ms in; space the strokes further apart"
     assert message in caught.value.problems
     assert len(patch.strokes(p, [(0.0, 0.0), (0.06, 0.0)]).noise) == len(p.noise)
+
+
+def test_a_roll_takes_a_spacing_under_a_millisecond() -> None:
+    """Accept strokes half a millisecond apart: any spacing above 0 that the strokes can hold."""
+    assert len(patch.roll(patch.loads(EXAMPLE), patch.Roll(2, 0.5)).noise) == len(patch.loads(EXAMPLE).noise)
+
+
+@pytest.mark.parametrize(
+    ("gap", "grace", "problem"),
+    [
+        (0.0, 12.0, "--gap: must be a positive number, found 0.0"),
+        (25.0, 0.0, "--grace: must be a positive number, found 0.0"),
+    ],
+)
+def test_a_flam_names_the_option_out_of_range(gap: float, grace: float, problem: str) -> None:
+    """Refuse a gap or a grace that is not above 0, saying which."""
+    with pytest.raises(PatchError) as caught:
+        patch.flam(ref("crack"), gap, grace)
+    assert caught.value.problems == [problem]
+
+
+TAIL_LIMIT = 3 * (patch.SHOULDER_MS + float(patch.MIN_SPACING_MS))  # a tail must hold three shoulders
+
+
+@pytest.mark.parametrize(
+    ("train", "problem"),
+    [
+        (patch.Train(0, 11.0), "--count: needs 1 to 10 bursts, found 0"),
+        (patch.Train(11, 11.0), "--count: needs 1 to 10 bursts, found 11"),
+        (patch.Train(4, 11.0, tail=TAIL_LIMIT), f"--tail: {TAIL_LIMIT!r} is out of range"),
+    ],
+)
+def test_a_train_names_the_option_out_of_range(train: patch.Train, problem: str) -> None:
+    """Refuse a count past 1 … 10 and a tail no longer than three shoulders, saying which."""
+    with pytest.raises(PatchError) as caught:
+        patch.bursts(ref("clap"), "noise[1]", train)
+    assert caught.value.problems == [problem]
+
+
+def test_bursts_name_the_layers_a_patch_has() -> None:
+    """Refuse a layer the patch lacks, listing every layer it has."""
+    clap = ref("clap")
+    with pytest.raises(PatchError) as caught:
+        patch.bursts(clap, "noise[9]", patch.Train(4, 11.0))
+    layers = ", ".join(f"noise[{j}]" for j in range(1, len(clap.noise) + 1))
+    assert caught.value.problems == [f"noise[9]: not a layer of this patch; it has {layers}"]
+
+
+def test_the_second_rims_curve_is_its_own() -> None:
+    """Read the second rim's shape by its path, the rim click's in the stack."""
+    assert patch.curve_knots(two_rims(), "rim[2].amp") == ref("rim-click").rim[0].amp
+
+
+def test_a_note_just_flat_reads_as_plus_zero_cents() -> None:
+    """Describe a pitch 0.04 cents flat of A4 as on it, with no minus sign before the zero."""
+    assert patch.describe_tuning(440.0 * 2 ** (-0.0004 / 12)) == "A4 +0.0 cents"
