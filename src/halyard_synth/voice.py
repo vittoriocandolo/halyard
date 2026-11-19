@@ -704,29 +704,37 @@ def crossings(brush: Brush) -> tuple[Floats, Floats, NDArray[np.intp]]:
     times: list[float] = []
     levels: list[int] = []
     segments: list[int] = []
-    t, r = brush.sweep.t, brush.sweep.v
-    for i in range(t.size - 1):
-        ra, rb = float(r[i]), float(r[i + 1])
-        if ra == rb:
-            continue
-        # Candidates from u at the ends, one wider either way for rounding; the levels decide, as ratios.
-        lowest, highest = reach(min(ra, rb), max(ra, rb))
-        ms = range(lowest, highest + 1) if rb > ra else range(highest, lowest - 1, -1)  # in the order u meets them
-        for m in ms:
-            level = 2.0 ** (m / STEPS)
-            if not min(ra, rb) <= level <= max(ra, rb):
-                continue
-            if level == ra:
-                tau = float(t[i])
-            elif level == rb:
-                tau = float(t[i + 1])
-            else:
-                tau = brentq(lambda x, lv=level: float(brush.sweep(x)) - lv, t[i], t[i + 1], xtol=1e-15)
+    for i in range(brush.sweep.t.size - 1):
+        for tau, m in _segment_crossings(brush.sweep, i):
             if not times or (tau, m) != (times[-1], levels[-1]):  # a crossing at a knot, once
                 times.append(tau)
                 levels.append(m)
                 segments.append(i)
     return np.array(times, dtype=float), np.array(levels, dtype=float), np.array(segments, dtype=np.intp)
+
+
+def _segment_crossings(sweep: Curve, i: int) -> list[tuple[float, int]]:
+    """Return where segment i of a sweep crosses each whole number of u, in the order it meets them."""
+    t, r = sweep.t, sweep.v
+    ra, rb = float(r[i]), float(r[i + 1])
+    if ra == rb:
+        return []
+    # Candidates from u at the ends, one wider either way for rounding; the levels decide, as ratios.
+    lowest, highest = reach(min(ra, rb), max(ra, rb))
+    ms = range(lowest, highest + 1) if rb > ra else range(highest, lowest - 1, -1)
+    found = []
+    for m in ms:
+        level = 2.0 ** (m / STEPS)
+        if not min(ra, rb) <= level <= max(ra, rb):
+            continue
+        if level == ra:
+            tau = float(t[i])
+        elif level == rb:
+            tau = float(t[i + 1])
+        else:
+            tau = brentq(lambda x, lv=level: float(sweep(x)) - lv, t[i], t[i + 1], xtol=1e-15)
+        found.append((tau, m))
+    return found
 
 
 def _sweep_rows(v: Voice, rate: int, tabs: Tables) -> list[Row]:

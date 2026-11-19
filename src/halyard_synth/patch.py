@@ -194,14 +194,16 @@ def _validate_pitch(
             problems.add(f"body.pitch[{k}].ratio", "must be positive")
         elif tune is not None and ratios is not None:
             # Every body frequency is extreme only at pitch knots, so the knots suffice.
-            for i, ratio in enumerate(ratios, 1):
-                f = tune * ratio * r
-                if not LOWEST_HZ <= f <= HIGHEST_HZ:
-                    where = "" if len(ratios) == 1 else f" for mode {i}"
-                    problems.add(
-                        f"body.pitch[{k}].ratio",
-                        f"body frequency {f:g} Hz{where} is outside 10 Hz … 20 kHz",
-                    )
+            _audible_at(k, tune, r, ratios, problems)
+
+
+def _audible_at(k: int, tune: float, r: float, ratios: list[float], problems: _Problems) -> None:
+    """Check every body frequency at pitch knot k, of ratio r, within 10 Hz … 20 kHz."""
+    for i, ratio in enumerate(ratios, 1):
+        f = tune * ratio * r
+        if not LOWEST_HZ <= f <= HIGHEST_HZ:
+            where = "" if len(ratios) == 1 else f" for mode {i}"
+            problems.add(f"body.pitch[{k}].ratio", f"body frequency {f:g} Hz{where} is outside 10 Hz … 20 kHz")
 
 
 def _validate_mode_list(
