@@ -65,29 +65,6 @@ PAIR = 2  # a knot, a mode and a band are pairs
 LOWEST_HZ, HIGHEST_HZ = 10.0, 20000.0  # where a body frequency may go
 
 
-def _as(kind: str, keys: tuple[str, str] = ("", ""), note: str = "") -> dict[str, TomlField]:
-    """Describe how a field is written in TOML, as a dataclass field's metadata."""
-    return {"toml": TomlField(kind, keys, note)}
-
-
-@dataclass(frozen=True)
-class TomlField:
-    """How a section's field is read from TOML and written back: its kind, a pair's keys and its comment.
-
-    A number is a float, written exactly; an integer and a choice are written as
-    they are; a band is [low, high]; pairs are an array of two-key inline
-    tables. Ranges and the rules between fields belong to validation.
-    """
-
-    kind: str  # "number", "integer", "choice", "band" or "pairs"
-    keys: tuple[str, str]  # a pairs field's two keys, in order
-    note: str  # the canonical text's comment
-
-
-NUMBER = _as("number")
-SHAPE = _as("pairs", ("ms", "gain"))
-
-
 class PatchError(ValueError):
     """An invalid patch or edit. `problems` lists every reason, each with its field path."""
 
@@ -95,110 +72,6 @@ class PatchError(ValueError):
         """Keep every problem, and say them all, one per line."""
         self.problems = list(problems)
         super().__init__("\n".join(self.problems))
-
-
-@dataclass(frozen=True)
-class Body:
-    """The modal body: its tuning, level and damping, its modes, its pitch glide and its shape."""
-
-    tune_hz: float = field(metadata=NUMBER)
-    level_db: float = field(metadata=NUMBER)
-    damping: float = field(metadata=_as("number", note="mode i decays ratio^damping times faster"))
-    modes: Knots = field(metadata=_as("pairs", ("ratio", "level_db"), "loudest mode exactly 0 dB"))
-    pitch: Knots = field(metadata=_as("pairs", ("ms", "ratio"), "ratio to tune_hz; starts at 0 ms, ends at 1"))
-    amp: Knots = field(metadata=_as("pairs", ("ms", "gain"), "shape: 0 at both ends, highest point exactly 1"))
-
-
-@dataclass(frozen=True)
-class Layer:
-    """A noise layer: its level, its band, its rattle depth and its shape."""
-
-    level_db: float = field(metadata=NUMBER)
-    band_hz: tuple[float, float] = field(metadata=_as("band"))  # (low, high)
-    rattle: float = field(metadata=_as("number", note="0 … 1, gated at the body's fundamental"))
-    amp: Knots = field(metadata=SHAPE)
-
-
-@dataclass(frozen=True)
-class Brush:
-    """A brush on the head: a noise layer whose band moves during the hit, by its sweep."""
-
-    level_db: float = field(metadata=NUMBER)
-    band_hz: tuple[float, float] = field(metadata=_as("band", note="at sweep ratio 1"))
-    rattle: float = field(metadata=_as("number", note="0 … 1, gated at the body's fundamental"))
-    sweep: Knots = field(metadata=_as("pairs", ("ms", "ratio"), "the band's edges times the ratio"))
-    amp: Knots = field(metadata=SHAPE)
-
-
-@dataclass(frozen=True)
-class Rim:
-    """The rim struck with or instead of the head: the hoop's ring and the stick's knock, as modes in Hz."""
-
-    level_db: float = field(metadata=NUMBER)
-    damping: float = field(metadata=_as("number", note="mode i decays (hz_i / hz_1)^damping times faster"))
-    modes: Knots = field(metadata=_as("pairs", ("hz", "level_db"), "loudest mode exactly 0 dB"))
-    amp: Knots = field(metadata=SHAPE)
-
-
-@dataclass(frozen=True)
-class Drive:
-    """The saturator's small-signal gain."""
-
-    db: float = field(metadata=_as("number", note="small-signal gain; 0 = bypass"))
-
-
-@dataclass(frozen=True)
-class Output:
-    """How the file is written: its rate, format, level mode and dB, and polarity."""
-
-    sample_rate: int = field(metadata=_as("integer"))
-    format: str = field(metadata=_as("choice", note='"float32" | "pcm24" | "pcm16"'))
-    mode: str = field(metadata=_as("choice", note='"gain" | "peak" | "true-peak"'))
-    db: float = field(metadata=_as("number", note="gain in dB, or peak target in dBFS"))
-    polarity: int = field(metadata=_as("integer"))
-
-
-@dataclass(frozen=True)
-class Takes:
-    """How a patch's takes differ as played: in strength, and in the timing of every rise after the first."""
-
-    strength_db: float = field(metadata=_as("number", note="each take this much harder or softer, at most"))
-    timing_ms: float = field(metadata=_as("number", note="each later rise this much earlier or later, at most"))
-
-
-@dataclass(frozen=True)
-class Patch:
-    """One hit, complete: its seed, body, layers, drive and output, and how its takes differ, if they do."""
-
-    seed: int
-    body: Body
-    noise: tuple[Layer, ...]
-    rim: tuple[Rim, ...]
-    brush: tuple[Brush, ...]
-    drive: Drive
-    output: Output
-    takes: Takes | None = None  # None: takes differ only in their noise
-
-    def __post_init__(self) -> None:
-        """Validate the patch, refusing it with every problem."""
-        problems = _Problems()
-        _validate(self, problems)
-        if problems:
-            raise PatchError(problems)
-
-    @property
-    def length_ms(self) -> float:
-        """T_src: the latest end among the shapes of the audible sources (plan §3).
-
-        A silent body still gates rattle, but only inside the layers it gates, so
-        it never lengthens the sound. With nothing audible the length is 0.
-        """
-        shapes = [(s.level_db, s.amp) for s in self.noise] + [(r.level_db, r.amp) for r in self.rim]
-        shapes += [(b.level_db, b.amp) for b in self.brush]
-        ends = [amp[-1][0] for level_db, amp in shapes if level_db > -math.inf]
-        if self.body.level_db > -math.inf:
-            ends.append(self.body.amp[-1][0])
-        return max(ends, default=0.0)
 
 
 # Validation. Each check reports every problem it finds, with its path.
@@ -305,72 +178,6 @@ def _kind(v: object) -> str:
     return _KINDS.get(type(v), type(v).__name__)
 
 
-def _validate(p: Patch, problems: _Problems) -> None:
-    """Check every part of a patch."""
-    _validate_seed(p.seed, problems)
-    _validate_body(p.body, problems)
-    noise: object = p.noise
-    if not isinstance(noise, tuple) or not all(isinstance(layer, Layer) for layer in noise):
-        problems.add("noise", "expected noise layers")
-    else:
-        _validate_layers(noise, problems)
-    rim: object = p.rim
-    if not isinstance(rim, tuple) or not all(isinstance(r, Rim) for r in rim):
-        problems.add("rim", "expected rims")
-    else:
-        _validate_rims(rim, problems)
-    brush: object = p.brush
-    if not isinstance(brush, tuple) or not all(isinstance(b, Brush) for b in brush):
-        problems.add("brush", "expected brushes")
-    else:
-        _validate_brushes(brush, problems)
-    _validate_drive(p.drive, problems)
-    _validate_output(p.output, problems)
-    if p.takes is not None:
-        _validate_takes(p, problems)
-
-
-def _validate_takes(p: Patch, problems: _Problems) -> None:
-    """Check how takes differ: within range, and the hardest and softest take inside the valid domain."""
-    t: object = p.takes
-    if not isinstance(t, Takes):
-        problems.add("takes", "expected a takes section")
-        return
-    strength = problems.number("takes.strength_db", t.strength_db, 0.0, MAX_TAKE_DB)
-    problems.number("takes.timing_ms", t.timing_ms, 0.0, MAX_TAKE_MS)
-    if not strength or problems:  # the extremes are checked only on a patch with nothing else wrong
-        return
-    plain = dataclasses.replace(p, takes=None)
-    for db, how in ((-strength, "harder"), (strength, "softer")):
-        try:
-            softer(plain, db)
-        except PatchError as e:
-            problems.add("takes.strength_db", f"a take struck {strength:g} dB {how} leaves the domain: {e.problems[0]}")
-
-
-def _validate_seed(seed: object, problems: _Problems) -> None:
-    """Check the seed."""
-    if isinstance(seed, bool) or not isinstance(seed, int):
-        problems.add("seed", f"expected an integer, found {_kind(seed)}")
-    elif not 0 <= seed <= MAX_SEED:
-        problems.add("seed", f"{seed} is outside 0 … 2**63 - 1")
-
-
-def _validate_body(b: object, problems: _Problems) -> None:
-    """Check the body: its numbers, modes, pitch curve and shape."""
-    if not isinstance(b, Body):
-        problems.add("body", "expected a body section")
-        return
-    tune = problems.number("body.tune_hz", b.tune_hz, 40.0, 4000.0)
-    problems.number("body.level_db", b.level_db, -90.0, 24.0, silence=True)
-    problems.number("body.damping", b.damping, 0.0, 3.0)
-    ratios = _validate_modes(b.modes, problems)
-    pitch = problems.knots("body.pitch", b.pitch, "ratio", 2, MAX_BODY_MS)
-    if pitch is not None:
-        _validate_pitch(pitch, tune, ratios, problems)
-    problems.shape("body.amp", b.amp, MAX_BODY_MS)
-
-
 def _validate_pitch(
     pitch: list[tuple[float, float]],
     tune: float | None,
@@ -395,14 +202,6 @@ def _validate_pitch(
                         f"body.pitch[{k}].ratio",
                         f"body frequency {f:g} Hz{where} is outside 10 Hz … 20 kHz",
                     )
-
-
-def _validate_modes(modes: object, problems: _Problems) -> list[float] | None:
-    """Return the body's mode ratios if they are valid, else None: the first exactly 1, the rest up to 8."""
-    ratios = _validate_mode_list(modes, "body.modes", ("ratio", 1.0, MAX_RATIO, MAX_MODES), "mode ratios", problems)
-    if ratios is not None and ratios[0] != 1.0:
-        problems.add("body.modes[1].ratio", "the first mode defines the tuning: its ratio must be exactly 1")
-    return ratios
 
 
 def _validate_mode_list(
@@ -436,41 +235,6 @@ def _validate_mode_list(
     return valid if len(valid) == len(values) else None
 
 
-def _validate_layers(layers: tuple[Layer, ...], problems: _Problems) -> None:
-    """Check the layers: how many, and each."""
-    if not 1 <= len(layers) <= MAX_LAYERS:
-        problems.add("noise", f"needs 1 to {MAX_LAYERS} layers, found {len(layers)}")
-    for j, layer in enumerate(layers, 1):
-        _validate_layer(layer, f"noise[{j}]", problems)
-
-
-def _validate_layer(layer: Layer, path: str, problems: _Problems) -> None:
-    """Check one layer."""
-    problems.number(f"{path}.level_db", layer.level_db, -90.0, 24.0, silence=True)
-    band: object = layer.band_hz
-    if not isinstance(band, tuple) or len(band) != PAIR:
-        problems.add(f"{path}.band_hz", "expected [low, high] in Hz")
-    else:
-        lo = problems.number(f"{path}.band_hz[1]", band[0], 20.0, 20000.0)
-        hi = problems.number(f"{path}.band_hz[2]", band[1], 20.0, 20000.0)
-        if lo is not None and hi is not None and not lo < hi:
-            problems.add(f"{path}.band_hz", f"the low edge {lo:g} Hz must be below the high edge {hi:g} Hz")
-    problems.number(f"{path}.rattle", layer.rattle, 0.0, 1.0)
-    problems.shape(f"{path}.amp", layer.amp, MAX_NOISE_MS)
-
-
-def _validate_brushes(brushes: tuple[Brush, ...], problems: _Problems) -> None:
-    """Check the brushes: how many, and each, its band moved by its sweep."""
-    if len(brushes) > MAX_BRUSHES:
-        problems.add("brush", f"at most {MAX_BRUSHES} brush, found {len(brushes)}")
-    for j, b in enumerate(brushes, 1):
-        path = f"brush[{j}]"
-        _validate_layer(Layer(b.level_db, b.band_hz, b.rattle, b.amp), path, problems)
-        sweep = problems.knots(f"{path}.sweep", b.sweep, "ratio", 2, MAX_NOISE_MS)
-        if sweep is not None:
-            _validate_sweep(sweep, b.band_hz, path, problems)
-
-
 def _validate_sweep(sweep: list[tuple[float, float]], band: object, path: str, problems: _Problems) -> None:
     """Check a sweep: ratios within 0.5 … 2, an octave apart at most, the band audible at every knot."""
     outside = [(k, r) for k, (_, r) in enumerate(sweep, 1) if not SWEEP[0] <= r <= SWEEP[1]]
@@ -493,24 +257,267 @@ def _validate_sweep(sweep: list[tuple[float, float]], band: object, path: str, p
             problems.add(f"{path}.sweep", f"takes the high edge to {hi * high:g} Hz, above 20 kHz")
 
 
+# Every field's check. Each reports every problem it finds, with its field's path, and returns what it checked,
+# which the fields after it in the section may need: the pitch curve needs the tuning and the modes it moves.
+
+type Check = Callable[[_Problems, str, Any, Any, dict[str, Any]], Any]  # (problems, path, value, section, checked)
+
+
+def _range(lo: float, hi: float, *, silence: bool = False) -> Check:
+    """Check a number within lo … hi, or -inf where silence is allowed."""
+    return lambda problems, path, v, _section, _checked: problems.number(path, v, lo, hi, silence=silence)
+
+
+def _one_of_numbers(allowed: tuple[int, ...]) -> Check:
+    """Check an integer that is one of those allowed."""
+    return lambda problems, path, v, _section, _checked: problems.integer(path, v, allowed)
+
+
+def _one_of(allowed: tuple[str, ...]) -> Check:
+    """Check a string that is one of those allowed."""
+    return lambda problems, path, v, _section, _checked: problems.choice(path, v, allowed)
+
+
+def _shape(max_ms: float) -> Check:
+    """Check an amplitude shape ending by max_ms."""
+    return lambda problems, path, v, _section, _checked: problems.shape(path, v, max_ms)
+
+
+def _band(problems: _Problems, path: str, band: object, _section: object, _checked: dict[str, Any]) -> object:
+    """Check a band: [low, high] in Hz, both audible, low below high."""
+    if not isinstance(band, tuple) or len(band) != PAIR:
+        problems.add(path, "expected [low, high] in Hz")
+        return None
+    lo = problems.number(f"{path}[1]", band[0], 20.0, 20000.0)
+    hi = problems.number(f"{path}[2]", band[1], 20.0, 20000.0)
+    if lo is not None and hi is not None and not lo < hi:
+        problems.add(path, f"the low edge {lo:g} Hz must be below the high edge {hi:g} Hz")
+    return band
+
+
+def _body_modes(problems: _Problems, path: str, modes: object, _section: object, _checked: dict[str, Any]) -> object:
+    """Check the body's modes and return their ratios, the first exactly 1, the rest up to 8."""
+    ratios = _validate_mode_list(modes, path, ("ratio", 1.0, MAX_RATIO, MAX_MODES), "mode ratios", problems)
+    if ratios is not None and ratios[0] != 1.0:
+        problems.add(f"{path}[1].ratio", "the first mode defines the tuning: its ratio must be exactly 1")
+    return ratios
+
+
+def _body_pitch(problems: _Problems, path: str, pitch: object, _section: object, checked: dict[str, Any]) -> object:
+    """Check the pitch curve, with every body frequency of the tuning and the modes audible at every knot."""
+    knots = problems.knots(path, pitch, "ratio", 2, MAX_BODY_MS)
+    if knots is not None:
+        _validate_pitch(knots, checked["tune_hz"], checked["modes"], problems)
+    return knots
+
+
+def _rim_modes(problems: _Problems, path: str, modes: object, _section: object, checked: dict[str, Any]) -> object:
+    """Check a rim's modes in Hz, whose highest the damping may not make decay too much faster than its first."""
+    hz = _validate_mode_list(modes, path, ("hz", *RIM_HZ, MAX_RIM_MODES), "rim modes", problems)
+    damping = checked["damping"]
+    if hz is not None and damping is not None and (s := (hz[-1] / hz[0]) ** damping) > MAX_COMPRESSION:
+        problems.add(
+            f"{path.removesuffix('.modes')}.damping",
+            f"its highest mode would decay {s:.4g} times faster than its first, more than "
+            f"{MAX_COMPRESSION:g}; lower the damping or bring the modes closer",
+        )
+    return hz
+
+
+def _sweep(problems: _Problems, path: str, sweep: object, section: Brush, _checked: dict[str, Any]) -> object:
+    """Check a brush's sweep, which moves its band."""
+    knots = problems.knots(path, sweep, "ratio", 2, MAX_NOISE_MS)
+    if knots is not None:
+        _validate_sweep(knots, section.band_hz, path.removesuffix(".sweep"), problems)
+    return knots
+
+
+def _output_db(problems: _Problems, path: str, db: object, _section: object, checked: dict[str, Any]) -> object:
+    """Check the output's dB: a gain up to +24 dB, or a peak target up to 0 dBFS."""
+    return problems.number(path, db, -60.0, 24.0 if checked["mode"] == "gain" else 0.0)
+
+
+@dataclass(frozen=True)
+class Spec:
+    """How a section's field is read, checked and written: its TOML kind, a pair's keys, its comment and its check.
+
+    A number is a float, written exactly; an integer and a choice are written as
+    they are; a band is [low, high]; pairs are an array of two-key inline
+    tables. The check sees the fields checked before it, for the rules between
+    fields.
+    """
+
+    kind: str  # "number", "integer", "choice", "band" or "pairs"
+    keys: tuple[str, str]  # a pairs field's two keys, in order
+    note: str  # the canonical text's comment
+    check: Check
+
+
+def _spec(kind: str, check: Check, keys: tuple[str, str] = ("", ""), note: str = "") -> dict[str, Spec]:
+    """Describe a field, as a dataclass field's metadata."""
+    return {"spec": Spec(kind, keys, note, check)}
+
+
+LEVEL = _spec("number", _range(-90.0, 24.0, silence=True))
+RATTLE = _spec("number", _range(0.0, 1.0), note="0 … 1, gated at the body's fundamental")
+
+
+@dataclass(frozen=True)
+class Body:
+    """The modal body: its tuning, level and damping, its modes, its pitch glide and its shape."""
+
+    tune_hz: float = field(metadata=_spec("number", _range(40.0, 4000.0)))
+    level_db: float = field(metadata=LEVEL)
+    damping: float = field(metadata=_spec("number", _range(0.0, 3.0), note="mode i decays ratio^damping times faster"))
+    modes: Knots = field(metadata=_spec("pairs", _body_modes, ("ratio", "level_db"), "loudest mode exactly 0 dB"))
+    pitch: Knots = field(
+        metadata=_spec("pairs", _body_pitch, ("ms", "ratio"), "ratio to tune_hz; starts at 0 ms, ends at 1"),
+    )
+    amp: Knots = field(
+        metadata=_spec("pairs", _shape(MAX_BODY_MS), ("ms", "gain"), "shape: 0 at both ends, highest point exactly 1"),
+    )
+
+
+@dataclass(frozen=True)
+class Layer:
+    """A noise layer: its level, its band, its rattle depth and its shape."""
+
+    level_db: float = field(metadata=LEVEL)
+    band_hz: tuple[float, float] = field(metadata=_spec("band", _band))  # (low, high)
+    rattle: float = field(metadata=RATTLE)
+    amp: Knots = field(metadata=_spec("pairs", _shape(MAX_NOISE_MS), ("ms", "gain")))
+
+
+@dataclass(frozen=True)
+class Brush:
+    """A brush on the head: a noise layer whose band moves during the hit, by its sweep."""
+
+    level_db: float = field(metadata=LEVEL)
+    band_hz: tuple[float, float] = field(metadata=_spec("band", _band, note="at sweep ratio 1"))
+    rattle: float = field(metadata=RATTLE)
+    sweep: Knots = field(metadata=_spec("pairs", _sweep, ("ms", "ratio"), "the band's edges times the ratio"))
+    amp: Knots = field(metadata=_spec("pairs", _shape(MAX_NOISE_MS), ("ms", "gain")))
+
+
+@dataclass(frozen=True)
+class Rim:
+    """The rim struck with or instead of the head: the hoop's ring and the stick's knock, as modes in Hz."""
+
+    level_db: float = field(metadata=LEVEL)
+    damping: float = field(
+        metadata=_spec("number", _range(0.0, 3.0), note="mode i decays (hz_i / hz_1)^damping times faster"),
+    )
+    modes: Knots = field(metadata=_spec("pairs", _rim_modes, ("hz", "level_db"), "loudest mode exactly 0 dB"))
+    amp: Knots = field(metadata=_spec("pairs", _shape(MAX_BODY_MS), ("ms", "gain")))
+
+
+@dataclass(frozen=True)
+class Drive:
+    """The saturator's small-signal gain."""
+
+    db: float = field(metadata=_spec("number", _range(0.0, 48.0), note="small-signal gain; 0 = bypass"))
+
+
+@dataclass(frozen=True)
+class Output:
+    """How the file is written: its rate, format, level mode and dB, and polarity."""
+
+    sample_rate: int = field(metadata=_spec("integer", _one_of_numbers(SAMPLE_RATES)))
+    format: str = field(metadata=_spec("choice", _one_of(FORMATS), note='"float32" | "pcm24" | "pcm16"'))
+    mode: str = field(metadata=_spec("choice", _one_of(MODES), note='"gain" | "peak" | "true-peak"'))
+    db: float = field(metadata=_spec("number", _output_db, note="gain in dB, or peak target in dBFS"))
+    polarity: int = field(metadata=_spec("integer", _one_of_numbers((1, -1))))
+
+
+@dataclass(frozen=True)
+class Takes:
+    """How a patch's takes differ as played: in strength, and in the timing of every rise after the first."""
+
+    strength_db: float = field(
+        metadata=_spec("number", _range(0.0, MAX_TAKE_DB), note="each take this much harder or softer, at most"),
+    )
+    timing_ms: float = field(
+        metadata=_spec("number", _range(0.0, MAX_TAKE_MS), note="each later rise this much earlier or later, at most"),
+    )
+
+
+@dataclass(frozen=True)
+class Patch:
+    """One hit, complete: its seed, body, layers, drive and output, and how its takes differ, if they do."""
+
+    seed: int
+    body: Body
+    noise: tuple[Layer, ...]
+    rim: tuple[Rim, ...]
+    brush: tuple[Brush, ...]
+    drive: Drive
+    output: Output
+    takes: Takes | None = None  # None: takes differ only in their noise
+
+    def __post_init__(self) -> None:
+        """Validate the patch, refusing it with every problem."""
+        problems = _Problems()
+        _validate(self, problems)
+        if problems:
+            raise PatchError(problems)
+
+    @property
+    def length_ms(self) -> float:
+        """T_src: the latest end among the shapes of the audible sources (plan §3).
+
+        A silent body still gates rattle, but only inside the layers it gates, so
+        it never lengthens the sound. With nothing audible the length is 0.
+        """
+        shapes = [(s.level_db, s.amp) for s in self.noise] + [(r.level_db, r.amp) for r in self.rim]
+        shapes += [(b.level_db, b.amp) for b in self.brush]
+        ends = [amp[-1][0] for level_db, amp in shapes if level_db > -math.inf]
+        if self.body.level_db > -math.inf:
+            ends.append(self.body.amp[-1][0])
+        return max(ends, default=0.0)
+
+
+type Section = Body | Layer | Rim | Brush | Drive | Output | Takes
+
+
+def _check(section: Section, path: str, problems: _Problems) -> dict[str, Any]:
+    """Check a section's fields in order, each seeing those before it, and return what each checked."""
+    checked: dict[str, Any] = {}
+    for f in dataclasses.fields(section):
+        spec: Spec = f.metadata["spec"]
+        checked[f.name] = spec.check(problems, f"{path}.{f.name}", getattr(section, f.name), section, checked)
+    return checked
+
+
+def _validate_body(b: object, problems: _Problems) -> None:
+    """Check the body."""
+    if not isinstance(b, Body):
+        problems.add("body", "expected a body section")
+    else:
+        _check(b, "body", problems)
+
+
+def _validate_layers(layers: tuple[Layer, ...], problems: _Problems) -> None:
+    """Check the layers: how many, and each."""
+    if not 1 <= len(layers) <= MAX_LAYERS:
+        problems.add("noise", f"needs 1 to {MAX_LAYERS} layers, found {len(layers)}")
+    for j, layer in enumerate(layers, 1):
+        _check(layer, f"noise[{j}]", problems)
+
+
+def _validate_brushes(brushes: tuple[Brush, ...], problems: _Problems) -> None:
+    """Check the brushes: how many, and each."""
+    if len(brushes) > MAX_BRUSHES:
+        problems.add("brush", f"at most {MAX_BRUSHES} brush, found {len(brushes)}")
+    for j, b in enumerate(brushes, 1):
+        _check(b, f"brush[{j}]", problems)
+
+
 def _validate_rims(rims: tuple[Rim, ...], problems: _Problems) -> None:
     """Check the rims: how many, and each."""
     if len(rims) > MAX_RIMS:
         problems.add("rim", f"at most {MAX_RIMS} rims, found {len(rims)}")
     for j, r in enumerate(rims, 1):
-        path = f"rim[{j}]"
-        problems.number(f"{path}.level_db", r.level_db, -90.0, 24.0, silence=True)
-        damping = problems.number(f"{path}.damping", r.damping, 0.0, 3.0)
-        hz = _validate_mode_list(r.modes, f"{path}.modes", ("hz", *RIM_HZ, MAX_RIM_MODES), "rim modes", problems)
-        if hz is not None and damping is not None:
-            s = (hz[-1] / hz[0]) ** damping
-            if s > MAX_COMPRESSION:
-                problems.add(
-                    f"{path}.damping",
-                    f"its highest mode would decay {s:.4g} times faster than its first, more than "
-                    f"{MAX_COMPRESSION:g}; lower the damping or bring the modes closer",
-                )
-        problems.shape(f"{path}.amp", r.amp, MAX_BODY_MS)
+        _check(r, f"rim[{j}]", problems)
 
 
 def _validate_drive(d: object, problems: _Problems) -> None:
@@ -518,19 +525,65 @@ def _validate_drive(d: object, problems: _Problems) -> None:
     if not isinstance(d, Drive):
         problems.add("drive", "expected a drive section")
     else:
-        problems.number("drive.db", d.db, 0.0, 48.0)
+        _check(d, "drive", problems)
 
 
 def _validate_output(o: object, problems: _Problems) -> None:
     """Check the output section."""
     if not isinstance(o, Output):
         problems.add("output", "expected an output section")
+    else:
+        _check(o, "output", problems)
+
+
+def _validate(p: Patch, problems: _Problems) -> None:
+    """Check every part of a patch."""
+    _validate_seed(p.seed, problems)
+    _validate_body(p.body, problems)
+    noise: object = p.noise
+    if not isinstance(noise, tuple) or not all(isinstance(layer, Layer) for layer in noise):
+        problems.add("noise", "expected noise layers")
+    else:
+        _validate_layers(noise, problems)
+    rim: object = p.rim
+    if not isinstance(rim, tuple) or not all(isinstance(r, Rim) for r in rim):
+        problems.add("rim", "expected rims")
+    else:
+        _validate_rims(rim, problems)
+    brush: object = p.brush
+    if not isinstance(brush, tuple) or not all(isinstance(b, Brush) for b in brush):
+        problems.add("brush", "expected brushes")
+    else:
+        _validate_brushes(brush, problems)
+    _validate_drive(p.drive, problems)
+    _validate_output(p.output, problems)
+    if p.takes is not None:
+        _validate_takes(p, problems)
+
+
+def _validate_takes(p: Patch, problems: _Problems) -> None:
+    """Check how takes differ: within range, and the hardest and softest take inside the valid domain."""
+    t: object = p.takes
+    if not isinstance(t, Takes):
+        problems.add("takes", "expected a takes section")
         return
-    problems.integer("output.sample_rate", o.sample_rate, SAMPLE_RATES)
-    problems.choice("output.format", o.format, FORMATS)
-    mode = problems.choice("output.mode", o.mode, MODES)
-    problems.number("output.db", o.db, -60.0, 24.0 if mode == "gain" else 0.0)
-    problems.integer("output.polarity", o.polarity, (1, -1))
+    strength = _check(t, "takes", problems)["strength_db"]
+    if not strength or problems:  # the extremes are checked only on a patch with nothing else wrong
+        return
+    plain = dataclasses.replace(p, takes=None)
+    for db, how in ((-strength, "harder"), (strength, "softer")):
+        try:
+            softer(plain, db)
+        except PatchError as e:
+            problems.add("takes.strength_db", f"a take struck {strength:g} dB {how} leaves the domain: {e.problems[0]}")
+
+
+def _validate_seed(seed: object, problems: _Problems) -> None:
+    """Check the seed."""
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        problems.add("seed", f"expected an integer, found {_kind(seed)}")
+    elif not 0 <= seed <= MAX_SEED:
+        problems.add("seed", f"{seed} is outside 0 … 2**63 - 1")
 
 
 # Parsing.
@@ -601,7 +654,7 @@ def _read[S: (Body, Layer, Rim, Brush, Drive, Output, Takes)](
         return None
     values: dict[str, Any] = {}
     for f in fields:
-        spec: TomlField = f.metadata["toml"]
+        spec: Spec = f.metadata["spec"]
         v = t[f.name]
         if spec.kind == "number":
             values[f.name] = _float(v)
@@ -611,7 +664,7 @@ def _read[S: (Body, Layer, Rim, Brush, Drive, Output, Takes)](
             values[f.name] = _pairs(problems, f"{path}.{f.name}", v, spec.keys)
         else:
             values[f.name] = v
-    if any(values[f.name] is None for f in fields if f.metadata["toml"].kind == "pairs"):
+    if any(values[f.name] is None for f in fields if f.metadata["spec"].kind == "pairs"):
         return None
     return section(**values)
 
@@ -705,8 +758,7 @@ def from_dict(data: object) -> Patch:
     drive, output = _drive(problems, data), _output(problems, data)
     takes = _read(problems, "takes", data["takes"], Takes) if "takes" in data else None
     if takes is not None:
-        problems.number("takes.strength_db", takes.strength_db, 0.0, MAX_TAKE_DB)
-        problems.number("takes.timing_ms", takes.timing_ms, 0.0, MAX_TAKE_MS)
+        _check(takes, "takes", problems)
     # Anything missing or unbuilt has been reported, so with no problem every part is there and checked.
     if problems or body is None or noise is None or rim is None or brush is None or drive is None or output is None:
         raise PatchError(problems)
@@ -743,7 +795,7 @@ def _table(section: Body | Layer | Rim | Brush | Drive | Output | Takes) -> dict
     """Return a section as the table its TOML parses to."""
     out: dict[str, Any] = {}
     for f in dataclasses.fields(section):
-        spec: TomlField = f.metadata["toml"]
+        spec: Spec = f.metadata["spec"]
         v = getattr(section, f.name)
         if spec.kind == "band":
             out[f.name] = list(v)
@@ -795,7 +847,7 @@ def _text(section: Body | Layer | Rim | Brush | Drive | Output | Takes) -> list[
     lines: list[str] = []
     rows: list[tuple[str, str, str]] = []
     for f in dataclasses.fields(section):
-        spec: TomlField = f.metadata["toml"]
+        spec: Spec = f.metadata["spec"]
         v = getattr(section, f.name)
         if spec.kind == "pairs":
             lines += _rows(rows) if rows else []
