@@ -588,7 +588,7 @@ def test_a_process_forked_after_a_render_renders_too() -> None:
 
     The child inherits the parent's caches and locks but none of its threads, so nothing may wait on those threads.
     """
-    if sys.platform != "win32":  # a check the type checker reads too, unlike a skip mark
+    if sys.platform == "linux":  # a check the type checker reads too, unlike a skip mark
         expected = render.render(loads(EXAMPLE))[0].tobytes()
         with warnings.catch_warnings():  # Python warns that forking a process with threads may deadlock: the point here
             warnings.simplefilter("ignore", DeprecationWarning)
@@ -601,4 +601,4 @@ def test_a_process_forked_after_a_render_renders_too() -> None:
         assert not alive, "the forked child hung"
         assert child.exitcode == 0
         return
-    pytest.skip("Windows has no fork")
+    pytest.skip("fork is the default only on Linux: Windows has none, and macOS's system libraries make it unsafe")
