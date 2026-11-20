@@ -9,7 +9,8 @@ scale; a change to the sound of an existing patch is a new version.
 
 ## [0.1.0] - Unreleased
 
-The first public release.
+The first public release. The references' voicing may change in later versions,
+and each such change will be recorded here.
 
 ### Added
 
