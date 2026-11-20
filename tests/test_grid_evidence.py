@@ -62,11 +62,27 @@ def rows() -> Rows:
     return grid.load(ROOT / "docs" / "grid" / f"k{K}.csv")
 
 
+def _same(a: object, b: object) -> bool:
+    """Return whether two fixtures' edits agree: numbers to 1e-12, everything else exactly.
+
+    The random fixtures are drawn through powers of ten, which each platform's maths library may round differently in
+    the last place, so the fixtures drawn on one platform differ from the recorded ones by that much on another.
+    """
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
+    if isinstance(a, float) and isinstance(b, float):
+        return math.isclose(a, b, rel_tol=1e-12)
+    return type(a) is type(b) and a == b
+
+
 def test_the_grid_is_the_current_fixtures(rows: Rows) -> None:
-    """Find every recorded row made from the fixture the grid makes today."""
-    current = {(fam, name): json.dumps(edits) for fam, name, edits in grid.fixtures()}
-    recorded = {(r["family"], r["name"]): r["edits"] for r in rows}
-    assert recorded == current
+    """Find every recorded row made from the fixture the grid makes today, to the last places of its numbers."""
+    current = {(fam, name): edits for fam, name, edits in grid.fixtures()}
+    recorded = {(r["family"], r["name"]): json.loads(r["edits"]) for r in rows}
+    assert recorded.keys() == current.keys()
+    assert [key for key in current if not _same(recorded[key], json.loads(json.dumps(current[key])))] == []
 
 
 def test_the_grid_covers_the_corners(rows: Rows) -> None:
