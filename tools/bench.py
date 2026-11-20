@@ -65,7 +65,9 @@ def cpu() -> str:
 
 def _memory() -> int:
     """Return this process's peak resident memory, in KiB."""
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if sys.platform != "win32":
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    sys.exit("the benchmark reads peak memory from the resource module, which Windows lacks")
 
 
 def hit(case: Case) -> dict[str, float]:
