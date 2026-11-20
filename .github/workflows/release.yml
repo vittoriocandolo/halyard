@@ -26,12 +26,6 @@ jobs:
           enable-cache: false
       - name: Check that the tag names the version being released
         run: test "${GITHUB_REF_NAME#v}" = "$(uv version --short)"
-      - name: Check that the project's address replaced the placeholder
-        run: |
-          if grep -n "github.com/OWNER/" pyproject.toml; then
-            echo "::error file=pyproject.toml::set [project.urls] to the repository's address before releasing"
-            exit 1
-          fi
       - run: uv run --locked pytest
       - run: uv build
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

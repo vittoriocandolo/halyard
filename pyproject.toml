@@ -26,12 +26,11 @@ classifiers = [
 ]
 dependencies = ["numpy>=2.4", "scipy>=1.17"]
 
-# Replace OWNER with the repository's account before releasing: the release workflow refuses the placeholder.
 [project.urls]
-Repository = "https://github.com/OWNER/halyard"
-Documentation = "https://github.com/OWNER/halyard/tree/master/docs"
-Changelog = "https://github.com/OWNER/halyard/blob/master/CHANGELOG.md"
-Issues = "https://github.com/OWNER/halyard/issues"
+Repository = "https://github.com/vittoriocandolo/halyard"
+Documentation = "https://github.com/vittoriocandolo/halyard/tree/master/docs"
+Changelog = "https://github.com/vittoriocandolo/halyard/blob/master/CHANGELOG.md"
+Issues = "https://github.com/vittoriocandolo/halyard/issues"
 
 [project.optional-dependencies]
 audition = ["sounddevice>=0.5"]

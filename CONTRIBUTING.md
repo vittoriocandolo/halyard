@@ -98,9 +98,7 @@ it replaces the shipped data, which changes every render.
 ## Releasing
 
 1. Set the version in `pyproject.toml` and `src/halyard_synth/__init__.py`; a
-   test checks that they agree. Before the first release, replace `OWNER` in
-   `[project.urls]` with the repository's account: the release workflow
-   refuses the placeholder.
+   test checks that they agree.
 2. Move the changelog's entries under the new version, with the date.
 3. Tag the commit `vX.Y.Z` and push the tag.
 
