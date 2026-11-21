@@ -301,6 +301,12 @@ class Hits:
         return out
 
 
+# A file's size and modification time show every edit only once the file is older than its file system's clock can
+# tell apart: Windows stamps times in steps of about 16 ms and FAT in steps of 2 s, so an edit of the same length made
+# within one step of the last leaves both unchanged. Until a file is this old, its content is compared as well.
+RACY_NS = 2_000_000_000
+
+
 class Watcher:
     """Renders the newest version of a file in the background."""
 
@@ -327,7 +333,7 @@ class Watcher:
         try:
             st = self.path.stat()
             stamp = (st.st_mtime_ns, st.st_size)
-            if stamp == self._stamp:
+            if stamp == self._stamp and time.time_ns() - st.st_mtime_ns > RACY_NS:
                 return
             text = read_text(self.path)
         except (OSError, UnicodeDecodeError):  # gone, or caught mid-save: the next look reads it whole
