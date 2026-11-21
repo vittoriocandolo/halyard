@@ -270,11 +270,15 @@ def test_verify(capsys: pytest.CaptureFixture[str], example: Path) -> None:
 @pytest.mark.parametrize(
     ("body", "message"),
     [
-        (b"{", "the embedded patch is damaged"),
-        (b"[" * 100_000, "the embedded patch is damaged"),
-        (b'{"patch": 5}', "the embedded patch is damaged"),
-        (b'{"patch": "\\u001b]52;c;cHduZWQ=\\u0007"}', "holds control characters (U+0007, U+001B)"),
-        (b'{"patch": "# snare\\u009b2J"}', "holds control characters (U+009B)"),
+        pytest.param(b"{", "the embedded patch is damaged", id="unclosed"),
+        pytest.param(b"[" * 100_000, "the embedded patch is damaged", id="nested"),
+        pytest.param(b'{"patch": 5}', "the embedded patch is damaged", id="not-text"),
+        pytest.param(
+            b'{"patch": "\\u001b]52;c;cHduZWQ=\\u0007"}',
+            "holds control characters (U+0007, U+001B)",
+            id="osc-52",
+        ),
+        pytest.param(b'{"patch": "# snare\\u009b2J"}', "holds control characters (U+009B)", id="csi"),
     ],
 )
 def test_extract_prints_only_an_intact_patch(

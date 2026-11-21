@@ -8,6 +8,7 @@ import itertools
 import math
 import multiprocessing
 import re
+import sys
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing.context import BaseContext
@@ -260,13 +261,24 @@ def test_packs_refuse_names_a_map_would_misread(ladder: list[Path], name: str, h
         pack.build([("snare", loud)], stem=" snare")
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param(
+            "snare\n<region> sample=other.wav key=1",
+            marks=pytest.mark.skipif(sys.platform == "win32", reason="Windows allows no file a name like this"),
+        ),
+        "snare $KEY",
+    ],
+)
 def test_the_command_refuses_a_patch_named_to_misread(
+    name: str,
     ladder: list[Path],
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Run `halyard pack` on a file named to add a region to the map, and write nothing."""
-    evil = tmp_path / "snare\n<region> sample=other.wav key=1.toml"
+    """Run `halyard pack` on a file named to add a region to, or break, the map, and write nothing."""
+    evil = tmp_path / f"{name}.toml"
     evil.write_text(ladder[0].read_text(encoding="utf-8"), encoding="utf-8")
     code = cli.main(["pack", str(evil), "--out", str(tmp_path / "kit")])
     assert code == cli.CliError("").status
