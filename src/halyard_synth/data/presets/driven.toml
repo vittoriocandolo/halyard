@@ -1,0 +1,58 @@
+instrument = "snare"
+schema = 1
+seed = 1
+
+[body]
+tune_hz  = 208.0
+level_db = 0.0
+damping  = 1.0              # mode i decays ratio^damping times faster
+modes = [                   # loudest mode exactly 0 dB
+  { ratio = 1.0,   level_db = 0.0 },
+  { ratio = 1.593, level_db = -6.0 },
+  { ratio = 2.136, level_db = -12.0 },
+]
+pitch = [                   # ratio to tune_hz; starts at 0 ms, ends at 1
+  { ms = 0.0, ratio = 1.12 },
+  { ms = 8.0, ratio = 1.0 },
+]
+amp = [                     # shape: 0 at both ends, highest point exactly 1
+  { ms = 0.0,   gain = 0.0 },
+  { ms = 0.3,   gain = 1.0 },
+  { ms = 18.0,  gain = 0.55 },
+  { ms = 70.0,  gain = 0.2 },
+  { ms = 170.0, gain = 0.0 },
+]
+
+[[noise]]                   # noise[1]
+level_db = -10.0
+band_hz  = [1500.0, 16000.0]
+rattle   = 0.0              # 0 … 1, gated at the body's fundamental
+amp = [
+  { ms = 0.0,  gain = 0.0 },
+  { ms = 0.04, gain = 1.0 },
+  { ms = 0.14, gain = 0.7 },
+  { ms = 2.0,  gain = 0.1 },
+  { ms = 6.0,  gain = 0.0 },
+]
+
+[[noise]]                   # noise[2]
+level_db = -6.0
+band_hz  = [2500.0, 9000.0]
+rattle   = 0.4              # 0 … 1, gated at the body's fundamental
+amp = [
+  { ms = 0.0,   gain = 0.0 },
+  { ms = 1.0,   gain = 1.0 },
+  { ms = 30.0,  gain = 0.45 },
+  { ms = 100.0, gain = 0.1 },
+  { ms = 200.0, gain = 0.0 },
+]
+
+[drive]
+db = 12.0                   # small-signal gain; 0 = bypass
+
+[output]
+sample_rate = 48000
+format      = "float32"     # "float32" | "pcm24" | "pcm16"
+mode        = "gain"        # "gain" | "peak" | "true-peak"
+db          = -17.5         # gain in dB, or peak target in dBFS
+polarity    = 1

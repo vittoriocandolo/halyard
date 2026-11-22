@@ -1,0 +1,84 @@
+{
+  "design": {
+    "method": "Kaiser linear-phase prototype, minimum_phase(method='homomorphic', half=False), taps renormalized to sum to 1",
+    "passband_hz": 20000.0,
+    "attenuation_db": 116.0,
+    "n_fft": 1048576,
+    "numpy": "2.4.6",
+    "scipy": "1.17.1"
+  },
+  "filters": {
+    "44100x16": {
+      "base": 44100,
+      "K": 16,
+      "rate": 705600,
+      "taps": 2593,
+      "file": "decimator-44100x16.f64",
+      "sha256": "0932afce82f960c811e1a3bf74ccc4636a5aefd2161f5d69466b0a522955c7d0",
+      "passband_db": 1.6695453221504165e-05,
+      "stopband_db": 115.67580158984988,
+      "length_ms": 3.674886621315193,
+      "energy99_ms": 0.8489229024943311
+    },
+    "48000x16": {
+      "base": 48000,
+      "K": 16,
+      "rate": 768000,
+      "taps": 1447,
+      "file": "decimator-48000x16.f64",
+      "sha256": "753e10eadb9b6550d7dfc81847d7a3057b578c8d3bfe07278d0b474d7e29b676",
+      "passband_db": 1.4976848078574656e-05,
+      "stopband_db": 115.85767975538461,
+      "length_ms": 1.8841145833333333,
+      "energy99_ms": 0.51953125
+    },
+    "44100x32": {
+      "base": 44100,
+      "K": 32,
+      "rate": 1411200,
+      "taps": 5183,
+      "file": "decimator-44100x32.f64",
+      "sha256": "7b063d24485ffd4a2802f042ea867c347463022aee2faf69a711bcd2f27639c4",
+      "passband_db": 3.65920934787638e-05,
+      "stopband_db": 115.60228641925355,
+      "length_ms": 3.6727607709750565,
+      "energy99_ms": 0.8496315192743764
+    },
+    "48000x32": {
+      "base": 48000,
+      "K": 32,
+      "rate": 1536000,
+      "taps": 2891,
+      "file": "decimator-48000x32.f64",
+      "sha256": "69797574530979e57d55849bcc2bc84907f3d336d670e5b85a579544d6ef5dd0",
+      "passband_db": 1.781214961805296e-05,
+      "stopband_db": 115.14480509713563,
+      "length_ms": 1.8821614583333333,
+      "energy99_ms": 0.5201822916666666
+    },
+    "44100x64": {
+      "base": 44100,
+      "K": 64,
+      "rate": 2822400,
+      "taps": 10363,
+      "file": "decimator-44100x64.f64",
+      "sha256": "b6108201a1aebbb83ac1957d730543699e6c44b8cc0efaf823aab9507f6a7aff",
+      "passband_db": 1.8910894956911415e-05,
+      "stopband_db": 115.37080451126,
+      "length_ms": 3.6716978458049887,
+      "energy99_ms": 0.8496315192743764
+    },
+    "48000x64": {
+      "base": 48000,
+      "K": 64,
+      "rate": 3072000,
+      "taps": 5781,
+      "file": "decimator-48000x64.f64",
+      "sha256": "caa6ec2ebc9ae36fe62b0ce79efe77507661224283c1852807073b8d036e0acd",
+      "passband_db": 1.6396057628776097e-05,
+      "stopband_db": 115.17609666104545,
+      "length_ms": 1.8818359375,
+      "energy99_ms": 0.5205078125
+    }
+  }
+}

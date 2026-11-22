@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read # to check out the repository
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - run: uv run --locked ruff check
+      - run: uv run --locked ruff format --check
+      - run: uv run --locked typos
+      - run: git ls-files -z '*.md' | xargs -0 uv run --locked mdformat --check
+      - run: uv run --locked python -m docs.build --check
+      - run: uv run --locked zizmor --persona auditor .
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  test:
+    name: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12", "3.13", "3.14", "3.15"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv run --locked mypy
+      - run: uv run --locked coverage run -m pytest
+      - run: uv run --locked coverage report
+
+  oldest:
+    name: test with the oldest NumPy and SciPy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          python-version: "3.12"
+      - run: uv run --resolution lowest-direct pytest
+
+  fuzz:
+    name: fuzz
+    runs-on: ubuntu-latest  # x86-64, where Atheris has wheels
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          python-version: "3.12"
+      - run: uv run --locked --group fuzz python fuzz/patch.py -max_total_time=120 -timeout=20
+      - run: uv run --locked --group fuzz python fuzz/wav.py -max_total_time=120 -timeout=20
+
+  build:
+    name: build the package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - run: uv build

@@ -1,0 +1,61 @@
+instrument = "snare"
+schema = 1
+seed = 1
+
+[body]
+tune_hz  = 200.0
+level_db = -8.0
+damping  = 0.5              # mode i decays ratio^damping times faster
+modes = [                   # loudest mode exactly 0 dB
+  { ratio = 1.0,   level_db = 0.0 },
+  { ratio = 1.593, level_db = -6.0 },
+]
+pitch = [                   # ratio to tune_hz; starts at 0 ms, ends at 1
+  { ms = 0.0,  ratio = 1.0 },
+  { ms = 10.0, ratio = 1.0 },
+]
+amp = [                     # shape: 0 at both ends, highest point exactly 1
+  { ms = 0.0,   gain = 0.0 },
+  { ms = 200.0, gain = 0.15 },
+  { ms = 330.0, gain = 0.5 },
+  { ms = 394.0, gain = 1.0 },
+  { ms = 400.0, gain = 0.0 },
+]
+
+[[noise]]                   # noise[1]
+level_db = -10.0
+band_hz  = [2000.0, 10000.0]
+rattle   = 0.2              # 0 … 1, gated at the body's fundamental
+amp = [
+  { ms = 0.0,   gain = 0.0 },
+  { ms = 220.0, gain = 0.15 },
+  { ms = 340.0, gain = 0.5 },
+  { ms = 394.0, gain = 1.0 },
+  { ms = 400.0, gain = 0.0 },
+]
+
+[[brush]]                   # brush[1]: a noise layer whose band moves
+level_db = -10.0
+band_hz  = [1200.0, 9000.0] # at sweep ratio 1
+rattle   = 0.0              # 0 … 1, gated at the body's fundamental
+sweep = [                   # the band's edges times the ratio
+  { ms = 0.0,   ratio = 0.55 },
+  { ms = 390.0, ratio = 1.05 },
+]
+amp = [
+  { ms = 0.0,   gain = 0.0 },
+  { ms = 180.0, gain = 0.15 },
+  { ms = 330.0, gain = 0.55 },
+  { ms = 395.0, gain = 1.0 },
+  { ms = 400.0, gain = 0.0 },
+]
+
+[drive]
+db = 4.0                    # small-signal gain; 0 = bypass
+
+[output]
+sample_rate = 48000
+format      = "float32"     # "float32" | "pcm24" | "pcm16"
+mode        = "gain"        # "gain" | "peak" | "true-peak"
+db          = -17.4         # gain in dB, or peak target in dBFS
+polarity    = 1

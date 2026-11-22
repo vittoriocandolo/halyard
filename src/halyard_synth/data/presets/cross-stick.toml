@@ -1,0 +1,62 @@
+instrument = "snare"
+schema = 1
+seed = 1
+
+[body]
+tune_hz  = 260.0
+level_db = -12.0
+damping  = 1.5              # mode i decays ratio^damping times faster
+modes = [                   # loudest mode exactly 0 dB
+  { ratio = 1.0,   level_db = 0.0 },
+  { ratio = 1.593, level_db = -6.0 },
+]
+pitch = [                   # ratio to tune_hz; starts at 0 ms, ends at 1
+  { ms = 0.0, ratio = 1.02 },
+  { ms = 4.0, ratio = 1.0 },
+]
+amp = [                     # shape: 0 at both ends, highest point exactly 1
+  { ms = 0.0,  gain = 0.0 },
+  { ms = 0.3,  gain = 1.0 },
+  { ms = 10.0, gain = 0.35 },
+  { ms = 40.0, gain = 0.1 },
+  { ms = 90.0, gain = 0.0 },
+]
+
+[[noise]]                   # noise[1]
+level_db = -16.0
+band_hz  = [1200.0, 9000.0]
+rattle   = 0.0              # 0 … 1, gated at the body's fundamental
+amp = [
+  { ms = 0.0,  gain = 0.0 },
+  { ms = 0.05, gain = 1.0 },
+  { ms = 0.25, gain = 0.4 },
+  { ms = 2.0,  gain = 0.06 },
+  { ms = 6.0,  gain = 0.0 },
+]
+
+[[rim]]                     # rim[1]: the modes of the hoop and the stick, in Hz
+level_db = -2.0
+damping  = 1.5              # mode i decays (hz_i / hz_1)^damping times faster
+modes = [                   # loudest mode exactly 0 dB
+  { hz = 520.0,  level_db = -3.0 },
+  { hz = 1150.0, level_db = 0.0 },
+  { hz = 2380.0, level_db = -6.0 },
+  { hz = 4100.0, level_db = -14.0 },
+]
+amp = [
+  { ms = 0.0,  gain = 0.0 },
+  { ms = 0.1,  gain = 1.0 },
+  { ms = 6.0,  gain = 0.5 },
+  { ms = 25.0, gain = 0.15 },
+  { ms = 70.0, gain = 0.0 },
+]
+
+[drive]
+db = 8.0                    # small-signal gain; 0 = bypass
+
+[output]
+sample_rate = 48000
+format      = "float32"     # "float32" | "pcm24" | "pcm16"
+mode        = "gain"        # "gain" | "peak" | "true-peak"
+db          = -7.3          # gain in dB, or peak target in dBFS
+polarity    = 1
